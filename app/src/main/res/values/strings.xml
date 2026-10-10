@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Hadi\'s Care</string>
+    <string name="service_notification_channel_name">Hadi\'s Care Baby Monitor</string>
+    <string name="service_notification_channel_desc">Shows ongoing status when baby monitor audio listener is active.</string>
+    <string name="service_listening_title">Hadi\'s Care is Listening</string>
+    <string name="service_listening_text">Baby monitor active: analyzing ambient sounds</string>
+    <string name="service_response_playing_title">Soothing Baby…</string>
+    <string name="service_response_playing_text">Trigger detected! Playing response lullaby audio</string>
+    <string name="service_action_stop">Stop Monitoring</string>
+</resources>

@@ -1,0 +1,6 @@
+{
+  "name": "Hadi's Care",
+  "description": "Background audio listener & baby monitor that detects crying sounds and plays soothing lullabies automatically.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
