@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
@@ -267,7 +268,7 @@ fun SettingsAndHistorySection(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.VolumeUp,
+                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = null,
                             tint = BabyLovePrimary,
                             modifier = Modifier.size(18.dp)

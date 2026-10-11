@@ -183,16 +183,16 @@ class AudioProcessor(
         val classification: SoundClassification = when {
             rawDb < 34f -> SoundClassification.SILENCE
             transientNoiseRejector && isTransient -> SoundClassification.TRANSIENT_CLATTER
+            s1Similarity >= 0.65f -> SoundClassification.SAMPLE1_MATCH
             adultSpeechGuard && isAdultVoice -> SoundClassification.ADULT_VOICE
-            s1Similarity >= 0.68f -> SoundClassification.SAMPLE1_MATCH
-            isBabyCry -> SoundClassification.BABY_CRY
-            babyWhisperDetector && isBabyWhisper -> SoundClassification.BABY_WHISPER
+            !strictSample1Matching && isBabyCry -> SoundClassification.BABY_CRY
+            !strictSample1Matching && babyWhisperDetector && isBabyWhisper -> SoundClassification.BABY_WHISPER
             else -> SoundClassification.AMBIENT_NOISE
         }
 
         // Confidence calculation
         val confidence = when (classification) {
-            SoundClassification.SAMPLE1_MATCH -> s1Similarity
+            SoundClassification.SAMPLE1_MATCH -> max(s1Similarity, 0.70f)
             SoundClassification.BABY_CRY -> (0.68f + (spectralBands.infantPitchRatio * 0.30f)).coerceIn(0.6f, 0.98f)
             SoundClassification.BABY_WHISPER -> (0.62f + (spectralBands.whisperFormantRatio * 0.32f)).coerceIn(0.55f, 0.95f)
             SoundClassification.TRANSIENT_CLATTER -> 0.05f
@@ -203,14 +203,17 @@ class AudioProcessor(
 
         // Trigger Evaluation:
         // Claps, door slams, adult speech, and ambient noise are strictly rejected
-        val isValidTrigger = if (!isAudible || isTransient || isAdultVoice) {
+        val isValidTrigger = if (!isAudible || isTransient) {
             false
+        } else if (classification == SoundClassification.SAMPLE1_MATCH || s1Similarity >= 0.65f) {
+            confidence >= 0.60f
         } else if (strictSample1Matching) {
-            classification == SoundClassification.SAMPLE1_MATCH && confidence >= 0.66f
+            false
+        } else if (isAdultVoice) {
+            false
         } else {
-            (classification == SoundClassification.SAMPLE1_MATCH && confidence >= 0.64f) ||
-            (classification == SoundClassification.BABY_CRY && confidence >= 0.62f) ||
-            (babyWhisperDetector && classification == SoundClassification.BABY_WHISPER && confidence >= 0.60f)
+            (classification == SoundClassification.BABY_CRY && confidence >= 0.60f) ||
+            (babyWhisperDetector && classification == SoundClassification.BABY_WHISPER && confidence >= 0.58f)
         }
 
         return AudioFeatures(
@@ -405,18 +408,44 @@ class AudioProcessor(
 
         if (minLag >= maxLag || maxLag >= size) return 0f
 
-        var bestLag = 0
+        val limit = (size - maxLag).coerceAtMost(1024)
+        if (limit <= 0) return 0f
+
+        val correlations = DoubleArray(maxLag + 1)
         var maxCorrelation = 0.0
 
-        for (lag in minLag..maxLag step 2) {
+        for (lag in minLag..maxLag) {
             var sum = 0.0
-            val limit = (size - lag).coerceAtMost(1024)
             for (i in 0 until limit step 2) {
                 sum += buffer[i].toDouble() * buffer[i + lag].toDouble()
             }
+            correlations[lag] = sum
             if (sum > maxCorrelation) {
                 maxCorrelation = sum
+            }
+        }
+
+        if (maxCorrelation <= 0.0) return 0f
+
+        // Peak picking: find the first prominent local maximum (fundamental frequency)
+        // to avoid harmonic sub-octave multiples (e.g. 500Hz picked at 250Hz lag).
+        val threshold = maxCorrelation * 0.80
+        var bestLag = 0
+        for (lag in (minLag + 1) until maxLag) {
+            val curr = correlations[lag]
+            if (curr >= threshold && curr >= correlations[lag - 1] && curr >= correlations[lag + 1]) {
                 bestLag = lag
+                break
+            }
+        }
+
+        if (bestLag == 0) {
+            var highestVal = 0.0
+            for (lag in minLag..maxLag) {
+                if (correlations[lag] > highestVal) {
+                    highestVal = correlations[lag]
+                    bestLag = lag
+                }
             }
         }
 

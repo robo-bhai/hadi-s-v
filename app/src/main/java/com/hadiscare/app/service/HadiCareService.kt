@@ -39,7 +39,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlin.math.log10
 import kotlin.math.max
+import kotlin.math.sqrt
 
 class HadiCareService : Service() {
 

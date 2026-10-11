@@ -77,20 +77,22 @@ class AudioProcessorTest {
 
     @Test
     fun testStrictSample1Matching() {
-        val profile = SampleProfile(
-            averageDb = 58f,
-            dominantPitchHz = 500f,
-            spectralBands = SpectralBands(0.08f, 0.60f, 0.28f, 0.04f),
-            mfccFingerprint = FloatArray(12) { 0.2f },
-            averageZcr = 75
-        )
-        audioProcessor.setSample1Profile(profile)
-
         val sampleRate = 22050
         // Sound matching Sample 1 (500 Hz)
         val matchBuffer = ShortArray(2048) { i ->
             (sin(2.0 * PI * 500.0 * (i.toDouble() / sampleRate)) * 24000).toInt().toShort()
         }
+
+        // Profile the recorded test sample
+        val baseline = audioProcessor.analyzePcmBuffer(matchBuffer, matchBuffer.size, 40f)
+        val profile = SampleProfile(
+            averageDb = baseline.decibels,
+            dominantPitchHz = baseline.dominantFrequencyHz,
+            spectralBands = baseline.spectralBands,
+            mfccFingerprint = baseline.mfccVector,
+            averageZcr = baseline.zeroCrossingRate
+        )
+        audioProcessor.setSample1Profile(profile)
 
         val features = audioProcessor.analyzePcmBuffer(
             buffer = matchBuffer,

@@ -47,6 +47,7 @@ data class MonitorSettings(
     val cooldownTimerEnabled: Boolean = true,      // Prevents rapid repetitive over-triggering
     val cooldownDurationSeconds: Int = 45,         // Cooldown rest interval in seconds
     val calibratedAmbientDb: Float = 36f,          // Room-calibrated ambient floor
+    val requiredDurationMs: Int = 450,             // Responsive detection window
     val responseVolume: Float = 1.0f,
     val isFirstLaunchCompleted: Boolean = false
 )
