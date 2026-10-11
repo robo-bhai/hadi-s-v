@@ -86,6 +86,7 @@ class HadiCareViewModel(application: Application) : AndroidViewModel(application
                         durationSec = getAudioDurationSeconds(savedFile),
                         sourceType = "CUSTOM_FILE"
                     )
+                    HadiCareService.reloadProfile(getApplication())
                 } else {
                     preferencesManager.setResponseSample(
                         title = cleanTitle,
@@ -108,6 +109,7 @@ class HadiCareViewModel(application: Application) : AndroidViewModel(application
                     durationSec = duration,
                     sourceType = "RECORDED"
                 )
+                HadiCareService.reloadProfile(getApplication())
             } else {
                 preferencesManager.setResponseSample(
                     title = title,
@@ -127,6 +129,7 @@ class HadiCareViewModel(application: Application) : AndroidViewModel(application
             durationSec = 4,
             sourceType = "DEFAULT"
         )
+        HadiCareService.reloadProfile(getApplication())
     }
 
     fun useDefaultResponseSample() {

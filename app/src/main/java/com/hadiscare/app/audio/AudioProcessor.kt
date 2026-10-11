@@ -145,28 +145,45 @@ class AudioProcessor(
         previousRms = rms
 
         // 2. Adult Voice Detection
-        // Adult speech fundamental is 85 - 255 Hz with high energy in 0 - 260 Hz
-        val isAdultPitch = pitch in 80f..260f
-        val hasDominantAdultLowEnergy = spectralBands.lowRatio > 0.35f && spectralBands.infantPitchRatio < 0.28f
+        // Adult speech fundamental is 80 - 285 Hz with high energy in 0 - 260 Hz
+        val isAdultPitch = pitch in 80f..285f
+        val hasDominantAdultLowEnergy = spectralBands.lowRatio > 0.32f && spectralBands.infantPitchRatio < 0.30f
         val isAdultVoice = isAdultPitch || hasDominantAdultLowEnergy
 
         // 3. Sample 1 MFCC & Pitch Fingerprint Similarity
         var s1Similarity = 0f
         sample1Profile?.let { s1 ->
             val pitchDelta = abs(pitch - s1.dominantPitchHz)
-            val pitchProximity = if (pitchDelta < 70f) 1.0f else if (pitchDelta < 160f) 0.65f else 0.20f
+            // Stricter pitch proximity gate: babies' crying pitch varies ±35Hz normally.
+            // Voices differing by >120Hz or >180Hz are fundamentally different voices/people.
+            val pitchProximity = when {
+                pitchDelta < 30f -> 1.0f
+                pitchDelta < 60f -> 0.85f
+                pitchDelta < 95f -> 0.55f
+                pitchDelta < 140f -> 0.20f
+                pitchDelta < 180f -> 0.05f
+                else -> 0.0f
+            }
 
-            val mfccCosSim = cosineSimilarity(mfccs, s1.mfccFingerprint)
-            val bandScore = (
-                (1f - abs(spectralBands.infantPitchRatio - s1.spectralBands.infantPitchRatio)) * 0.40f +
-                (1f - abs(spectralBands.whisperFormantRatio - s1.spectralBands.whisperFormantRatio)) * 0.35f +
-                (1f - abs(spectralBands.lowRatio - s1.spectralBands.lowRatio)) * 0.25f
-            ).coerceIn(0f, 1f)
+            if (pitchProximity <= 0.01f) {
+                // Completely outside pitch range of Sample 1 -> cannot be the baby's voice
+                s1Similarity = 0f
+            } else {
+                val mfccCosSim = cosineSimilarity(mfccs, s1.mfccFingerprint)
+                val bandScore = (
+                    (1f - abs(spectralBands.infantPitchRatio - s1.spectralBands.infantPitchRatio) * 1.5f).coerceIn(0f, 1f) * 0.45f +
+                    (1f - abs(spectralBands.whisperFormantRatio - s1.spectralBands.whisperFormantRatio) * 1.5f).coerceIn(0f, 1f) * 0.35f +
+                    (1f - abs(spectralBands.lowRatio - s1.spectralBands.lowRatio) * 2.0f).coerceIn(0f, 1f) * 0.20f
+                ).coerceIn(0f, 1f)
 
-            s1Similarity = (mfccCosSim * 0.45f + pitchProximity * 0.35f + bandScore * 0.20f).coerceIn(0f, 1f)
+                // Multiplicative voice fingerprint gate:
+                // Timbre score scaled by pitch proximity so different voices are attenuated to zero
+                val timbreScore = (mfccCosSim * 0.70f + bandScore * 0.30f).coerceIn(0f, 1f)
+                s1Similarity = (timbreScore * (0.30f + 0.70f * pitchProximity) * if (pitchProximity < 0.3f) pitchProximity else 1.0f).coerceIn(0f, 1f)
+            }
         }
 
-        // 4. Baby Cry & Weeping Detection
+        // 4. Baby Cry & Weeping Detection (General baby models)
         val isBabyCryPitch = pitch in 320f..780f
         val hasInfantEnergy = (spectralBands.infantPitchRatio + spectralBands.whisperFormantRatio) >= 0.54f
         val isBabyCry = isBabyCryPitch && hasInfantEnergy && !isAdultVoice
@@ -179,20 +196,24 @@ class AudioProcessor(
         val effectiveThreshold = max(thresholdDb, ambientNoiseFloor + 6f)
         val isAudible = rawDb >= effectiveThreshold
 
-        // Classify Sound
+        // Classify Sound:
+        // When strictSample1Matching is ON, only match if s1Similarity meets the strict fingerprint threshold
+        val isSample1Matched = sample1Profile != null && s1Similarity >= if (strictSample1Matching) 0.65f else 0.58f
+
         val classification: SoundClassification = when {
             rawDb < 34f -> SoundClassification.SILENCE
             transientNoiseRejector && isTransient -> SoundClassification.TRANSIENT_CLATTER
-            s1Similarity >= 0.65f -> SoundClassification.SAMPLE1_MATCH
             adultSpeechGuard && isAdultVoice -> SoundClassification.ADULT_VOICE
-            !strictSample1Matching && isBabyCry -> SoundClassification.BABY_CRY
-            !strictSample1Matching && babyWhisperDetector && isBabyWhisper -> SoundClassification.BABY_WHISPER
+            isSample1Matched -> SoundClassification.SAMPLE1_MATCH
+            strictSample1Matching -> SoundClassification.AMBIENT_NOISE // In strict mode, general sounds without fingerprint match are ignored
+            isBabyCry -> SoundClassification.BABY_CRY
+            babyWhisperDetector && isBabyWhisper -> SoundClassification.BABY_WHISPER
             else -> SoundClassification.AMBIENT_NOISE
         }
 
         // Confidence calculation
         val confidence = when (classification) {
-            SoundClassification.SAMPLE1_MATCH -> max(s1Similarity, 0.70f)
+            SoundClassification.SAMPLE1_MATCH -> max(s1Similarity, 0.72f)
             SoundClassification.BABY_CRY -> (0.68f + (spectralBands.infantPitchRatio * 0.30f)).coerceIn(0.6f, 0.98f)
             SoundClassification.BABY_WHISPER -> (0.62f + (spectralBands.whisperFormantRatio * 0.32f)).coerceIn(0.55f, 0.95f)
             SoundClassification.TRANSIENT_CLATTER -> 0.05f
@@ -202,15 +223,16 @@ class AudioProcessor(
         }
 
         // Trigger Evaluation:
-        // Claps, door slams, adult speech, and ambient noise are strictly rejected
+        // Claps, door slams, adult speech, and ambient noise are strictly rejected.
+        // In strictSample1Matching mode, ONLY confirmed SAMPLE1_MATCH with valid fingerprint can trigger.
         val isValidTrigger = if (!isAudible || isTransient) {
             false
-        } else if (classification == SoundClassification.SAMPLE1_MATCH || s1Similarity >= 0.65f) {
-            confidence >= 0.60f
+        } else if (adultSpeechGuard && isAdultVoice) {
+            false
         } else if (strictSample1Matching) {
-            false
-        } else if (isAdultVoice) {
-            false
+            classification == SoundClassification.SAMPLE1_MATCH && s1Similarity >= 0.65f && confidence >= 0.62f
+        } else if (classification == SoundClassification.SAMPLE1_MATCH) {
+            s1Similarity >= 0.58f && confidence >= 0.58f
         } else {
             (classification == SoundClassification.BABY_CRY && confidence >= 0.60f) ||
             (babyWhisperDetector && classification == SoundClassification.BABY_WHISPER && confidence >= 0.58f)
@@ -238,7 +260,8 @@ class AudioProcessor(
     fun evaluateTriggerMatch(
         features: AudioFeatures,
         requiredDurationMs: Int,
-        chunkDurationMs: Long
+        chunkDurationMs: Long,
+        strictSample1Only: Boolean = false
     ): Boolean {
         if (classificationHistory.size >= 6) {
             classificationHistory.removeFirst()
@@ -249,9 +272,13 @@ class AudioProcessor(
         confidenceHistory.addLast(features.matchConfidence)
 
         val validMatches = classificationHistory.count {
-            it == SoundClassification.SAMPLE1_MATCH ||
-            it == SoundClassification.BABY_CRY ||
-            it == SoundClassification.BABY_WHISPER
+            if (strictSample1Only) {
+                it == SoundClassification.SAMPLE1_MATCH
+            } else {
+                it == SoundClassification.SAMPLE1_MATCH ||
+                it == SoundClassification.BABY_CRY ||
+                it == SoundClassification.BABY_WHISPER
+            }
         }
 
         val noAdultOrTransient = classificationHistory.none {
@@ -337,16 +364,20 @@ class AudioProcessor(
 
     private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
         if (a.isEmpty() || b.isEmpty() || a.size != b.size) return 0f
+        // Skip c0 (frame energy/loudness). Compare c1..c11 (individual voice timbre & vocal tract formants).
+        val startIdx = if (a.size > 1) 1 else 0
         var dot = 0.0
         var normA = 0.0
         var normB = 0.0
-        for (i in a.indices) {
+        for (i in startIdx until a.size) {
             dot += a[i] * b[i]
             normA += a[i] * a[i]
             normB += b[i] * b[i]
         }
         val denom = sqrt(normA) * sqrt(normB)
-        return if (denom > 0.0) ((dot / denom).toFloat() + 1f) / 2f else 0f
+        if (denom <= 0.0) return 0f
+        val cos = (dot / denom).toFloat()
+        return cos.coerceIn(0f, 1f)
     }
 
     private fun calculateSpectralBands(buffer: ShortArray, size: Int, rate: Int): SpectralBands {
@@ -464,6 +495,80 @@ class AudioProcessor(
         }
 
         try {
+            // Decode file to raw 16-bit PCM ShortArray using AudioFileDecoder (supports MP4, M4A, AAC, MP3, WAV)
+            val pcmData = AudioFileDecoder.decodeToShortArray(file, maxDurationSec = 8, targetSampleRate = sampleRate)
+            if (pcmData != null && pcmData.size >= 512) {
+                val chunkSize = 2048
+                var offset = 0
+                var totalDbSum = 0.0
+                var totalPitchSum = 0.0
+                var pitchCount = 0
+                var totalZcr = 0
+                var chunkCount = 0
+
+                var sumLow = 0f
+                var sumInfant = 0f
+                var sumWhisper = 0f
+                var sumHigh = 0f
+                val avgMfccs = FloatArray(12)
+
+                val chunk = ShortArray(chunkSize)
+                while (offset + chunkSize <= pcmData.size && chunkCount < 40) {
+                    System.arraycopy(pcmData, offset, chunk, 0, chunkSize)
+                    offset += chunkSize
+
+                    val features = analyzePcmBuffer(
+                        chunk, chunkSize, 40f,
+                        frequencyFilterEnabled = false,
+                        strictSample1Matching = false,
+                        adultSpeechGuard = false,
+                        babyWhisperDetector = true,
+                        transientNoiseRejector = false
+                    )
+
+                    totalDbSum += features.decibels
+                    if (features.dominantFrequencyHz in 150f..950f) {
+                        totalPitchSum += features.dominantFrequencyHz
+                        pitchCount++
+                    }
+                    totalZcr += features.zeroCrossingRate
+                    sumLow += features.spectralBands.lowRatio
+                    sumInfant += features.spectralBands.infantPitchRatio
+                    sumWhisper += features.spectralBands.whisperFormantRatio
+                    sumHigh += features.spectralBands.highNoiseRatio
+
+                    for (m in 0 until 12) {
+                        avgMfccs[m] += features.mfccVector[m]
+                    }
+
+                    chunkCount++
+                }
+
+                if (chunkCount > 0) {
+                    val avgDb = (totalDbSum / chunkCount).toFloat()
+                    val avgPitch = if (pitchCount > 0) (totalPitchSum / pitchCount).toFloat() else 450f
+                    val avgZcr = totalZcr / chunkCount
+                    for (m in 0 until 12) avgMfccs[m] /= chunkCount
+                    val avgBands = SpectralBands(
+                        sumLow / chunkCount,
+                        sumInfant / chunkCount,
+                        sumWhisper / chunkCount,
+                        sumHigh / chunkCount
+                    )
+
+                    val profile = SampleProfile(
+                        averageDb = avgDb,
+                        dominantPitchHz = avgPitch,
+                        spectralBands = avgBands,
+                        mfccFingerprint = avgMfccs,
+                        averageZcr = avgZcr
+                    )
+                    sample1Profile = profile
+                    return profile
+                }
+            }
+
+            // Fallback direct WAV streaming if codec unavailable
             FileInputStream(file).use { input ->
                 val bytes = ByteArray(4096)
                 var bytesRead: Int
@@ -501,7 +606,7 @@ class AudioProcessor(
                     )
 
                     totalDbSum += features.decibels
-                    if (features.dominantFrequencyHz in 150f..900f) {
+                    if (features.dominantFrequencyHz in 150f..950f) {
                         totalPitchSum += features.dominantFrequencyHz
                         pitchCount++
                     }

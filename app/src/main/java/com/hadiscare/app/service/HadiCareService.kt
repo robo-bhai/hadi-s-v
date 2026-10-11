@@ -104,6 +104,9 @@ class HadiCareService : Service() {
             ACTION_START_CALIBRATION -> {
                 startCalibrationFlow()
             }
+            ACTION_RELOAD_PROFILE -> {
+                loadSample1Profile()
+            }
             ACTION_START -> {
                 loadSample1Profile()
                 startForegroundServiceWithNotification()
@@ -222,7 +225,8 @@ class HadiCareService : Service() {
                         val isTriggered = !inCooldown && audioProcessor.evaluateTriggerMatch(
                             features = features,
                             requiredDurationMs = settings.requiredDurationMs,
-                            chunkDurationMs = chunkDurationMs
+                            chunkDurationMs = chunkDurationMs,
+                            strictSample1Only = settings.strictSample1Matching
                         )
 
                         if (isTriggered) {
@@ -532,6 +536,7 @@ class HadiCareService : Service() {
         const val ACTION_STOP = "com.hadiscare.app.ACTION_STOP"
         const val ACTION_SIMULATE_TRIGGER = "com.hadiscare.app.ACTION_SIMULATE_TRIGGER"
         const val ACTION_START_CALIBRATION = "com.hadiscare.app.ACTION_START_CALIBRATION"
+        const val ACTION_RELOAD_PROFILE = "com.hadiscare.app.ACTION_RELOAD_PROFILE"
 
         private val _monitorStatus = MutableStateFlow(MonitorStatus.IDLE)
         val monitorStatus: StateFlow<MonitorStatus> = _monitorStatus.asStateFlow()
@@ -599,6 +604,15 @@ class HadiCareService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
+                context.startService(intent)
+            }
+        }
+
+        fun reloadProfile(context: Context) {
+            if (_isServiceRunning.value) {
+                val intent = Intent(context, HadiCareService::class.java).apply {
+                    action = ACTION_RELOAD_PROFILE
+                }
                 context.startService(intent)
             }
         }

@@ -106,4 +106,40 @@ class AudioProcessorTest {
         assertEquals(SoundClassification.SAMPLE1_MATCH, features.classification)
         assertTrue("Sample 1 match should trigger in strict mode", features.isValidTrigger)
     }
+
+    @Test
+    fun testStrictSample1RejectsDifferentVoice() {
+        val sampleRate = 22050
+        // Recorded Sample 1 is 500 Hz
+        val matchBuffer = ShortArray(2048) { i ->
+            (sin(2.0 * PI * 500.0 * (i.toDouble() / sampleRate)) * 24000).toInt().toShort()
+        }
+
+        val baseline = audioProcessor.analyzePcmBuffer(matchBuffer, matchBuffer.size, 40f)
+        val profile = SampleProfile(
+            averageDb = baseline.decibels,
+            dominantPitchHz = baseline.dominantFrequencyHz,
+            spectralBands = baseline.spectralBands,
+            mfccFingerprint = baseline.mfccVector,
+            averageZcr = baseline.zeroCrossingRate
+        )
+        audioProcessor.setSample1Profile(profile)
+
+        // Incoming audio is 750 Hz (different voice pitch)
+        val differentVoiceBuffer = ShortArray(2048) { i ->
+            (sin(2.0 * PI * 750.0 * (i.toDouble() / sampleRate)) * 24000).toInt().toShort()
+        }
+
+        val features = audioProcessor.analyzePcmBuffer(
+            buffer = differentVoiceBuffer,
+            readSamples = differentVoiceBuffer.size,
+            thresholdDb = 45f,
+            frequencyFilterEnabled = true,
+            strictSample1Matching = true // User turned on all toggles / strict mode
+        )
+
+        // Must NOT match sample 1 fingerprint and must NOT trigger in strict mode
+        assertFalse("Different voice must not trigger when strict sample 1 matching is on", features.isValidTrigger)
+        assertTrue("Classification should not be SAMPLE1_MATCH", features.classification != SoundClassification.SAMPLE1_MATCH)
+    }
 }
