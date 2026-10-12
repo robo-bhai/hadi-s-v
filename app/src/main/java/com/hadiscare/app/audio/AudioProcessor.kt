@@ -58,6 +58,7 @@ class AudioProcessor(
     private val classificationHistory = ArrayDeque<SoundClassification>(8)
     private val confidenceHistory = ArrayDeque<Float>(8)
     private var sample1Profile: SampleProfile? = null
+    private val sampleProfiles = mutableListOf<SampleProfile>()
 
     // Previous frame RMS for transient impulse detection
     private var previousRms: Double = 0.0
@@ -65,11 +66,38 @@ class AudioProcessor(
     // Room ambient noise baseline
     private var ambientNoiseFloor: Float = 36f
 
+    fun setSampleProfiles(profiles: List<SampleProfile>) {
+        sampleProfiles.clear()
+        sampleProfiles.addAll(profiles)
+        if (profiles.isNotEmpty()) {
+            sample1Profile = profiles.first()
+        }
+    }
+
+    fun addSampleProfile(profile: SampleProfile) {
+        sampleProfiles.add(profile)
+        if (sample1Profile == null) {
+            sample1Profile = profile
+        }
+    }
+
+    fun clearSampleProfiles() {
+        sampleProfiles.clear()
+        sample1Profile = null
+    }
+
     fun setSample1Profile(profile: SampleProfile) {
         sample1Profile = profile
+        if (sampleProfiles.isEmpty()) {
+            sampleProfiles.add(profile)
+        } else {
+            sampleProfiles[0] = profile
+        }
     }
 
     fun getSample1Profile(): SampleProfile? = sample1Profile
+
+    fun getSampleProfiles(): List<SampleProfile> = sampleProfiles
 
     fun updateAmbientFloor(calibratedDb: Float) {
         ambientNoiseFloor = calibratedDb.coerceIn(25f, 65f)
@@ -150,36 +178,13 @@ class AudioProcessor(
         val hasDominantAdultLowEnergy = spectralBands.lowRatio > 0.32f && spectralBands.infantPitchRatio < 0.30f
         val isAdultVoice = isAdultPitch || hasDominantAdultLowEnergy
 
-        // 3. Sample 1 MFCC & Pitch Fingerprint Similarity
+        // 3. Multi-Sample MFCC & Pitch Fingerprint Similarity
+        val allProfiles = if (sampleProfiles.isNotEmpty()) sampleProfiles else listOfNotNull(sample1Profile)
         var s1Similarity = 0f
-        sample1Profile?.let { s1 ->
-            val pitchDelta = abs(pitch - s1.dominantPitchHz)
-            // Stricter pitch proximity gate: babies' crying pitch varies ±35Hz normally.
-            // Voices differing by >120Hz or >180Hz are fundamentally different voices/people.
-            val pitchProximity = when {
-                pitchDelta < 30f -> 1.0f
-                pitchDelta < 60f -> 0.85f
-                pitchDelta < 95f -> 0.55f
-                pitchDelta < 140f -> 0.20f
-                pitchDelta < 180f -> 0.05f
-                else -> 0.0f
-            }
-
-            if (pitchProximity <= 0.01f) {
-                // Completely outside pitch range of Sample 1 -> cannot be the baby's voice
-                s1Similarity = 0f
-            } else {
-                val mfccCosSim = cosineSimilarity(mfccs, s1.mfccFingerprint)
-                val bandScore = (
-                    (1f - abs(spectralBands.infantPitchRatio - s1.spectralBands.infantPitchRatio) * 1.5f).coerceIn(0f, 1f) * 0.45f +
-                    (1f - abs(spectralBands.whisperFormantRatio - s1.spectralBands.whisperFormantRatio) * 1.5f).coerceIn(0f, 1f) * 0.35f +
-                    (1f - abs(spectralBands.lowRatio - s1.spectralBands.lowRatio) * 2.0f).coerceIn(0f, 1f) * 0.20f
-                ).coerceIn(0f, 1f)
-
-                // Multiplicative voice fingerprint gate:
-                // Timbre score scaled by pitch proximity so different voices are attenuated to zero
-                val timbreScore = (mfccCosSim * 0.70f + bandScore * 0.30f).coerceIn(0f, 1f)
-                s1Similarity = (timbreScore * (0.30f + 0.70f * pitchProximity) * if (pitchProximity < 0.3f) pitchProximity else 1.0f).coerceIn(0f, 1f)
+        for (profile in allProfiles) {
+            val sim = calculateProfileSimilarity(pitch, spectralBands, mfccs, profile)
+            if (sim > s1Similarity) {
+                s1Similarity = sim
             }
         }
 
@@ -197,8 +202,8 @@ class AudioProcessor(
         val isAudible = rawDb >= effectiveThreshold
 
         // Classify Sound:
-        // When strictSample1Matching is ON, only match if s1Similarity meets the strict fingerprint threshold
-        val isSample1Matched = sample1Profile != null && s1Similarity >= if (strictSample1Matching) 0.65f else 0.58f
+        // When strictSample1Matching is ON, only match if s1Similarity meets the fingerprint threshold against any registered sample
+        val isSample1Matched = allProfiles.isNotEmpty() && s1Similarity >= if (strictSample1Matching) 0.60f else 0.52f
 
         val classification: SoundClassification = when {
             rawDb < 34f -> SoundClassification.SILENCE
@@ -230,9 +235,9 @@ class AudioProcessor(
         } else if (adultSpeechGuard && isAdultVoice) {
             false
         } else if (strictSample1Matching) {
-            classification == SoundClassification.SAMPLE1_MATCH && s1Similarity >= 0.65f && confidence >= 0.62f
+            classification == SoundClassification.SAMPLE1_MATCH && s1Similarity >= 0.60f && confidence >= 0.60f
         } else if (classification == SoundClassification.SAMPLE1_MATCH) {
-            s1Similarity >= 0.58f && confidence >= 0.58f
+            s1Similarity >= 0.52f && confidence >= 0.55f
         } else {
             (classification == SoundClassification.BABY_CRY && confidence >= 0.60f) ||
             (babyWhisperDetector && classification == SoundClassification.BABY_WHISPER && confidence >= 0.58f)
@@ -362,14 +367,43 @@ class AudioProcessor(
     private fun hzToMel(hz: Double): Double = 2595.0 * log10(1.0 + hz / 700.0)
     private fun melToHz(mel: Double): Double = 700.0 * (Math.pow(10.0, mel / 2595.0) - 1.0)
 
+    fun calculateProfileSimilarity(
+        pitch: Float,
+        spectralBands: SpectralBands,
+        mfccs: FloatArray,
+        profile: SampleProfile
+    ): Float {
+        val pitchDelta = abs(pitch - profile.dominantPitchHz)
+        val pitchProximity = when {
+            pitchDelta < 45f -> 1.0f
+            pitchDelta < 90f -> 0.85f
+            pitchDelta < 140f -> 0.65f
+            pitchDelta < 200f -> 0.35f
+            pitchDelta < 260f -> 0.10f
+            else -> 0.0f
+        }
+
+        if (pitchProximity <= 0.02f) {
+            return 0f
+        }
+
+        val mfccCosSim = cosineSimilarity(mfccs, profile.mfccFingerprint)
+        val bandScore = (
+            (1f - abs(spectralBands.infantPitchRatio - profile.spectralBands.infantPitchRatio) * 1.5f).coerceIn(0f, 1f) * 0.45f +
+            (1f - abs(spectralBands.whisperFormantRatio - profile.spectralBands.whisperFormantRatio) * 1.5f).coerceIn(0f, 1f) * 0.35f +
+            (1f - abs(spectralBands.lowRatio - profile.spectralBands.lowRatio) * 2.0f).coerceIn(0f, 1f) * 0.20f
+        ).coerceIn(0f, 1f)
+
+        val timbreScore = (mfccCosSim * 0.65f + bandScore * 0.35f).coerceIn(0f, 1f)
+        return (timbreScore * (0.35f + 0.65f * pitchProximity)).coerceIn(0f, 1f)
+    }
+
     private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
         if (a.isEmpty() || b.isEmpty() || a.size != b.size) return 0f
-        // Skip c0 (frame energy/loudness). Compare c1..c11 (individual voice timbre & vocal tract formants).
-        val startIdx = if (a.size > 1) 1 else 0
         var dot = 0.0
         var normA = 0.0
         var normB = 0.0
-        for (i in startIdx until a.size) {
+        for (i in a.indices) {
             dot += a[i] * b[i]
             normA += a[i] * a[i]
             normB += b[i] * b[i]
@@ -377,7 +411,7 @@ class AudioProcessor(
         val denom = sqrt(normA) * sqrt(normB)
         if (denom <= 0.0) return 0f
         val cos = (dot / denom).toFloat()
-        return cos.coerceIn(0f, 1f)
+        return ((cos + 1f) / 2f).coerceIn(0f, 1f)
     }
 
     private fun calculateSpectralBands(buffer: ShortArray, size: Int, rate: Int): SpectralBands {

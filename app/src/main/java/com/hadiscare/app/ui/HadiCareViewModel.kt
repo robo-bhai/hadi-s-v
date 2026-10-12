@@ -23,10 +23,12 @@ class HadiCareViewModel(application: Application) : AndroidViewModel(application
 
     private val preferencesManager = PreferencesManager(application)
 
+    val triggerSamples: StateFlow<List<AudioSampleInfo>> = preferencesManager.triggerSamples
     val triggerSample: StateFlow<AudioSampleInfo> = preferencesManager.triggerSample
     val responseSample: StateFlow<AudioSampleInfo> = preferencesManager.responseSample
     val settings: StateFlow<MonitorSettings> = preferencesManager.settings
     val triggerHistory: StateFlow<List<TriggerEvent>> = preferencesManager.triggerHistory
+    val isMonitoringActive: StateFlow<Boolean> = preferencesManager.isMonitoringActive
 
     val monitorStatus: StateFlow<MonitorStatus> = HadiCareService.monitorStatus
     val isServiceRunning: StateFlow<Boolean> = HadiCareService.isServiceRunning
@@ -118,6 +120,68 @@ class HadiCareViewModel(application: Application) : AndroidViewModel(application
                     sourceType = "RECORDED"
                 )
             }
+        }
+    }
+
+    fun addRecordedTriggerSample(file: File, title: String) {
+        viewModelScope.launch {
+            val duration = getAudioDurationSeconds(file)
+            val cleanTitle = title.ifBlank { "Recorded Cry ${triggerSamples.value.size + 1}" }
+            preferencesManager.addTriggerSample(
+                title = cleanTitle,
+                filePath = file.absolutePath,
+                durationSec = duration,
+                sourceType = "RECORDED"
+            )
+            HadiCareService.reloadProfile(getApplication())
+        }
+    }
+
+    fun addCustomTriggerSampleFromUri(uri: Uri, displayName: String?) {
+        viewModelScope.launch {
+            val fileName = "custom_trigger_${System.currentTimeMillis()}.mp3"
+            val savedFile = preferencesManager.saveAudioFromUri(uri, fileName)
+            if (savedFile != null && savedFile.exists()) {
+                val cleanTitle = displayName?.ifBlank { "Baby Audio ${triggerSamples.value.size + 1}" }
+                    ?: "Baby Audio ${triggerSamples.value.size + 1}"
+                preferencesManager.addTriggerSample(
+                    title = cleanTitle,
+                    filePath = savedFile.absolutePath,
+                    durationSec = getAudioDurationSeconds(savedFile),
+                    sourceType = "CUSTOM_FILE"
+                )
+                HadiCareService.reloadProfile(getApplication())
+            }
+        }
+    }
+
+    fun addPresetTriggerSample() {
+        val (defTrigger, _) = DefaultAudioGenerator.ensureDefaultAudioFiles(getApplication())
+        preferencesManager.addTriggerSample(
+            title = "Preset: Infant Cry Audio",
+            filePath = defTrigger.absolutePath,
+            durationSec = 4,
+            sourceType = "DEFAULT"
+        )
+        HadiCareService.reloadProfile(getApplication())
+    }
+
+    fun deleteTriggerSample(sampleId: String) {
+        if (_playingPreviewId.value == sampleId) {
+            stopPreview()
+        }
+        preferencesManager.removeTriggerSample(sampleId)
+        HadiCareService.reloadProfile(getApplication())
+    }
+
+    fun pauseMonitoringForManager(context: android.content.Context) {
+        stopPreview()
+        HadiCareService.pauseListening(context)
+    }
+
+    fun resumeMonitoringAfterManager(context: android.content.Context) {
+        if (preferencesManager.isMonitoringActive()) {
+            HadiCareService.resumeListening(context)
         }
     }
 

@@ -20,6 +20,9 @@ class PreferencesManager(private val context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("hadis_care_preferences", Context.MODE_PRIVATE)
 
+    private val _triggerSamples = MutableStateFlow(loadTriggerSamples())
+    val triggerSamples: StateFlow<List<AudioSampleInfo>> = _triggerSamples.asStateFlow()
+
     private val _triggerSample = MutableStateFlow(loadTriggerSample())
     val triggerSample: StateFlow<AudioSampleInfo> = _triggerSample.asStateFlow()
 
@@ -32,21 +35,46 @@ class PreferencesManager(private val context: Context) {
     private val _triggerHistory = MutableStateFlow(loadHistory())
     val triggerHistory: StateFlow<List<TriggerEvent>> = _triggerHistory.asStateFlow()
 
+    private val _isMonitoringActive = MutableStateFlow(prefs.getBoolean(KEY_MONITORING_ACTIVE, false))
+    val isMonitoringActive: StateFlow<Boolean> = _isMonitoringActive.asStateFlow()
+
     init {
         if (!_triggerSample.value.isSet || !_responseSample.value.isSet) {
             setupDefaultsIfEmpty()
         }
     }
 
+    fun setMonitoringActive(active: Boolean) {
+        prefs.edit().putBoolean(KEY_MONITORING_ACTIVE, active).apply()
+        _isMonitoringActive.value = active
+    }
+
+    fun isMonitoringActive(): Boolean {
+        return prefs.getBoolean(KEY_MONITORING_ACTIVE, false)
+    }
+
     fun setupDefaultsIfEmpty() {
         val (defTrigger, defResponse) = DefaultAudioGenerator.ensureDefaultAudioFiles(context)
         if (!_triggerSample.value.isSet) {
-            setTriggerSample(
+            val defaultSample = AudioSampleInfo(
+                id = "default_trigger",
                 title = "Preset: Infant Cry Audio",
                 filePath = defTrigger.absolutePath,
+                isSet = true,
                 durationSec = 4,
                 sourceType = "DEFAULT"
             )
+            setTriggerSample(
+                title = defaultSample.title,
+                filePath = defaultSample.filePath!!,
+                durationSec = defaultSample.durationSec,
+                sourceType = defaultSample.sourceType
+            )
+            if (_triggerSamples.value.isEmpty()) {
+                val list = listOf(defaultSample)
+                saveTriggerSamples(list)
+                _triggerSamples.value = list
+            }
         }
         if (!_responseSample.value.isSet) {
             setResponseSample(
@@ -58,23 +86,95 @@ class PreferencesManager(private val context: Context) {
         }
     }
 
-    fun setTriggerSample(title: String, filePath: String, durationSec: Int, sourceType: String) {
-        prefs.edit()
-            .putString(KEY_TRIGGER_TITLE, title)
-            .putString(KEY_TRIGGER_PATH, filePath)
-            .putInt(KEY_TRIGGER_DURATION, durationSec)
-            .putString(KEY_TRIGGER_SOURCE, sourceType)
-            .putBoolean(KEY_TRIGGER_IS_SET, true)
-            .apply()
-
-        _triggerSample.value = AudioSampleInfo(
-            id = "trigger",
+    fun addTriggerSample(title: String, filePath: String, durationSec: Int, sourceType: String): AudioSampleInfo {
+        val newSample = AudioSampleInfo(
+            id = java.util.UUID.randomUUID().toString(),
             title = title,
             filePath = filePath,
             isSet = true,
             durationSec = durationSec,
             sourceType = sourceType
         )
+        val currentList = _triggerSamples.value.toMutableList()
+        currentList.add(newSample)
+        saveTriggerSamples(currentList)
+        _triggerSamples.value = currentList
+
+        // Keep primary triggerSample in sync with first item
+        _triggerSample.value = currentList.first()
+        savePrimaryTriggerSampleToPrefs(currentList.first())
+
+        return newSample
+    }
+
+    fun removeTriggerSample(id: String): Boolean {
+        val currentList = _triggerSamples.value.toMutableList()
+        val toRemove = currentList.find { it.id == id } ?: return false
+
+        // Delete audio file if it is a user recorded/custom file
+        if (toRemove.sourceType == "RECORDED" && toRemove.filePath != null) {
+            try {
+                val f = File(toRemove.filePath)
+                if (f.exists()) f.delete()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        currentList.remove(toRemove)
+
+        // Ensure at least one default sample exists if list is now empty
+        if (currentList.isEmpty()) {
+            val (defTrigger, _) = DefaultAudioGenerator.ensureDefaultAudioFiles(context)
+            currentList.add(
+                AudioSampleInfo(
+                    id = "default_trigger",
+                    title = "Preset: Infant Cry Audio",
+                    filePath = defTrigger.absolutePath,
+                    isSet = true,
+                    durationSec = 4,
+                    sourceType = "DEFAULT"
+                )
+            )
+        }
+
+        saveTriggerSamples(currentList)
+        _triggerSamples.value = currentList
+        _triggerSample.value = currentList.first()
+        savePrimaryTriggerSampleToPrefs(currentList.first())
+        return true
+    }
+
+    private fun savePrimaryTriggerSampleToPrefs(sample: AudioSampleInfo) {
+        prefs.edit()
+            .putString(KEY_TRIGGER_TITLE, sample.title)
+            .putString(KEY_TRIGGER_PATH, sample.filePath)
+            .putInt(KEY_TRIGGER_DURATION, sample.durationSec)
+            .putString(KEY_TRIGGER_SOURCE, sample.sourceType)
+            .putBoolean(KEY_TRIGGER_IS_SET, sample.isSet)
+            .apply()
+    }
+
+    fun setTriggerSample(title: String, filePath: String, durationSec: Int, sourceType: String) {
+        val sample = AudioSampleInfo(
+            id = "trigger_main",
+            title = title,
+            filePath = filePath,
+            isSet = true,
+            durationSec = durationSec,
+            sourceType = sourceType
+        )
+        savePrimaryTriggerSampleToPrefs(sample)
+        _triggerSample.value = sample
+
+        val currentList = _triggerSamples.value.toMutableList()
+        if (currentList.isEmpty()) {
+            currentList.add(sample)
+        } else {
+            currentList[0] = sample
+        }
+        saveTriggerSamples(currentList)
+        _triggerSamples.value = currentList
     }
 
     fun setResponseSample(title: String, filePath: String, durationSec: Int, sourceType: String) {
@@ -238,7 +338,55 @@ class PreferencesManager(private val context: Context) {
         }
     }
 
+    private fun saveTriggerSamples(list: List<AudioSampleInfo>) {
+        val array = JSONArray()
+        for (item in list) {
+            val obj = JSONObject()
+            obj.put("id", item.id)
+            obj.put("title", item.title)
+            obj.put("path", item.filePath)
+            obj.put("duration", item.durationSec)
+            obj.put("source", item.sourceType)
+            obj.put("isSet", item.isSet)
+            array.put(obj)
+        }
+        prefs.edit().putString(KEY_TRIGGER_SAMPLES_JSON, array.toString()).apply()
+    }
+
+    private fun loadTriggerSamples(): List<AudioSampleInfo> {
+        val raw = prefs.getString(KEY_TRIGGER_SAMPLES_JSON, null)
+        if (!raw.isNullOrEmpty()) {
+            try {
+                val array = JSONArray(raw)
+                val list = mutableListOf<AudioSampleInfo>()
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val path = obj.optString("path", null)
+                    list.add(
+                        AudioSampleInfo(
+                            id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                            title = obj.optString("title", "Baby Cry Sample"),
+                            filePath = path,
+                            isSet = obj.optBoolean("isSet", true) && path != null && File(path).exists(),
+                            durationSec = obj.optInt("duration", 0),
+                            sourceType = obj.optString("source", "RECORDED")
+                        )
+                    )
+                }
+                if (list.isNotEmpty()) return list
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // Fallback: load primary trigger sample as a single-element list
+        val primary = loadTriggerSample()
+        return if (primary.isSet) listOf(primary) else emptyList()
+    }
+
     companion object {
+        const val KEY_MONITORING_ACTIVE = "key_monitoring_active"
+        private const val KEY_TRIGGER_SAMPLES_JSON = "trigger_samples_json"
         private const val KEY_TRIGGER_TITLE = "trigger_title"
         private const val KEY_TRIGGER_PATH = "trigger_path"
         private const val KEY_TRIGGER_DURATION = "trigger_duration"

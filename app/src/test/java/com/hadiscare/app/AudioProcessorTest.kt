@@ -142,4 +142,39 @@ class AudioProcessorTest {
         assertFalse("Different voice must not trigger when strict sample 1 matching is on", features.isValidTrigger)
         assertTrue("Classification should not be SAMPLE1_MATCH", features.classification != SoundClassification.SAMPLE1_MATCH)
     }
+
+    @Test
+    fun testMultipleSampleProfilesMatching() {
+        val sampleRate = 22050
+
+        // Profile 1: 500 Hz cry
+        val buf1 = ShortArray(2048) { i ->
+            (sin(2.0 * PI * 500.0 * (i.toDouble() / sampleRate)) * 24000).toInt().toShort()
+        }
+        val base1 = audioProcessor.analyzePcmBuffer(buf1, buf1.size, 40f)
+        val profile1 = SampleProfile(base1.decibels, base1.dominantFrequencyHz, base1.spectralBands, base1.mfccVector, base1.zeroCrossingRate)
+
+        // Profile 2: 720 Hz whimper/cry
+        val buf2 = ShortArray(2048) { i ->
+            (sin(2.0 * PI * 720.0 * (i.toDouble() / sampleRate)) * 24000).toInt().toShort()
+        }
+        val base2 = audioProcessor.analyzePcmBuffer(buf2, buf2.size, 40f)
+        val profile2 = SampleProfile(base2.decibels, base2.dominantFrequencyHz, base2.spectralBands, base2.mfccVector, base2.zeroCrossingRate)
+
+        // Register both profiles in AudioProcessor
+        audioProcessor.setSampleProfiles(listOf(profile1, profile2))
+
+        // Test incoming audio matching profile 2 (720 Hz)
+        val features = audioProcessor.analyzePcmBuffer(
+            buffer = buf2,
+            readSamples = buf2.size,
+            thresholdDb = 45f,
+            frequencyFilterEnabled = true,
+            strictSample1Matching = true
+        )
+
+        assertTrue("Sound matching Profile 2 should yield high similarity", features.sample1Similarity >= 0.60f)
+        assertEquals(SoundClassification.SAMPLE1_MATCH, features.classification)
+        assertTrue("Multi-sample library match should trigger", features.isValidTrigger)
+    }
 }

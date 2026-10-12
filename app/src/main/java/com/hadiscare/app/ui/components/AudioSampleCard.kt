@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,6 +57,8 @@ fun AudioSampleCard(
     icon: ImageVector,
     sampleInfo: AudioSampleInfo,
     isPlayingPreview: Boolean,
+    sampleCount: Int = 1,
+    onManageSamples: (() -> Unit)? = null,
     onPickFile: () -> Unit,
     onRecordAudio: () -> Unit,
     onUsePreset: () -> Unit,
@@ -84,7 +87,10 @@ fun AudioSampleCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Box(
                         modifier = Modifier
                             .size(38.dp)
@@ -101,10 +107,26 @@ fun AudioSampleCard(
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
-                        Text(
-                            text = "Sample $sampleNumber: $title",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Sample $sampleNumber: $title",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            if (sampleNumber == 1 && sampleCount > 1) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = BabyLoveMilk
+                                ) {
+                                    Text(
+                                        text = "$sampleCount Active",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = BabyLovePrimary
+                                    )
+                                }
+                            }
+                        }
                         Text(
                             text = subtitle,
                             style = MaterialTheme.typography.bodySmall,
@@ -192,6 +214,34 @@ fun AudioSampleCard(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+
+            // If manage samples callback provided (Sample 1), show primary "Manage Voice Samples" button
+            if (onManageSamples != null) {
+                Button(
+                    onClick = onManageSamples,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("manage_samples_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BabyLovePrimary,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Audiotrack,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Manage Voice Samples ($sampleCount)",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
             // Action buttons row: Pick file, Record, Use Preset
             Row(

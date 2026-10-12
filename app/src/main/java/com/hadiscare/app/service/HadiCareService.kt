@@ -23,6 +23,7 @@ import com.hadiscare.app.MainActivity
 import com.hadiscare.app.R
 import com.hadiscare.app.audio.AudioProcessor
 import com.hadiscare.app.audio.DefaultAudioGenerator
+import com.hadiscare.app.audio.SampleProfile
 import com.hadiscare.app.audio.SoundClassification
 import com.hadiscare.app.data.PreferencesManager
 import com.hadiscare.app.model.MonitorStatus
@@ -71,7 +72,31 @@ class HadiCareService : Service() {
         audioProcessor.updateAmbientFloor(preferencesManager.settings.value.calibratedAmbientDb)
         createNotificationChannel()
         acquireWakeLock()
-        loadSample1Profile()
+        loadAllTriggerProfiles()
+    }
+
+    fun loadAllTriggerProfiles() {
+        val samples = preferencesManager.triggerSamples.value
+        val profiles = mutableListOf<SampleProfile>()
+        for (sample in samples) {
+            val path = sample.filePath
+            if (!path.isNullOrEmpty()) {
+                val file = File(path)
+                if (file.exists() && file.length() > 100) {
+                    try {
+                        val profile = audioProcessor.analyzeSampleFile(file)
+                        profiles.add(profile)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        }
+        if (profiles.isNotEmpty()) {
+            audioProcessor.setSampleProfiles(profiles)
+        } else {
+            loadSample1Profile()
+        }
     }
 
     fun loadSample1Profile() {
@@ -84,14 +109,30 @@ class HadiCareService : Service() {
         }
     }
 
+    fun pauseListening() {
+        stopAudioRecord()
+        listeningJob?.cancel()
+        listeningJob = null
+        _monitorStatus.value = MonitorStatus.IDLE
+        _soundClassification.value = "Paused (Managing Samples)"
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_START
         when (action) {
             ACTION_STOP -> {
+                preferencesManager.setMonitoringActive(false)
                 stopMonitoring()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_PAUSE_LISTENING -> {
+                pauseListening()
+            }
+            ACTION_RESUME_LISTENING -> {
+                loadAllTriggerProfiles()
+                resumeListening()
             }
             ACTION_SIMULATE_TRIGGER -> {
                 handleTriggerMatch(
@@ -105,10 +146,11 @@ class HadiCareService : Service() {
                 startCalibrationFlow()
             }
             ACTION_RELOAD_PROFILE -> {
-                loadSample1Profile()
+                loadAllTriggerProfiles()
             }
             ACTION_START -> {
-                loadSample1Profile()
+                preferencesManager.setMonitoringActive(true)
+                loadAllTriggerProfiles()
                 startForegroundServiceWithNotification()
                 startListening()
             }
@@ -534,6 +576,8 @@ class HadiCareService : Service() {
 
         const val ACTION_START = "com.hadiscare.app.ACTION_START"
         const val ACTION_STOP = "com.hadiscare.app.ACTION_STOP"
+        const val ACTION_PAUSE_LISTENING = "com.hadiscare.app.ACTION_PAUSE_LISTENING"
+        const val ACTION_RESUME_LISTENING = "com.hadiscare.app.ACTION_RESUME_LISTENING"
         const val ACTION_SIMULATE_TRIGGER = "com.hadiscare.app.ACTION_SIMULATE_TRIGGER"
         const val ACTION_START_CALIBRATION = "com.hadiscare.app.ACTION_START_CALIBRATION"
         const val ACTION_RELOAD_PROFILE = "com.hadiscare.app.ACTION_RELOAD_PROFILE"
@@ -612,6 +656,24 @@ class HadiCareService : Service() {
             if (_isServiceRunning.value) {
                 val intent = Intent(context, HadiCareService::class.java).apply {
                     action = ACTION_RELOAD_PROFILE
+                }
+                context.startService(intent)
+            }
+        }
+
+        fun pauseListening(context: Context) {
+            if (_isServiceRunning.value) {
+                val intent = Intent(context, HadiCareService::class.java).apply {
+                    action = ACTION_PAUSE_LISTENING
+                }
+                context.startService(intent)
+            }
+        }
+
+        fun resumeListening(context: Context) {
+            if (_isServiceRunning.value) {
+                val intent = Intent(context, HadiCareService::class.java).apply {
+                    action = ACTION_RESUME_LISTENING
                 }
                 context.startService(intent)
             }

@@ -55,6 +55,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +79,7 @@ import com.hadiscare.app.ui.components.FirstLaunchSetupDialog
 import com.hadiscare.app.ui.components.HistoryTabScreen
 import com.hadiscare.app.ui.components.LiveMonitorCard
 import com.hadiscare.app.ui.components.RecordAudioDialog
+import com.hadiscare.app.ui.components.SampleManagerDialog
 import com.hadiscare.app.ui.theme.BabyLoveBorder
 import com.hadiscare.app.ui.theme.BabyLoveMilk
 import com.hadiscare.app.ui.theme.BabyLovePrimary
@@ -104,10 +106,12 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(viewModel: HadiCareViewModel) {
     val context = LocalContext.current
 
+    val triggerSamples by viewModel.triggerSamples.collectAsStateWithLifecycle()
     val triggerSample by viewModel.triggerSample.collectAsStateWithLifecycle()
     val responseSample by viewModel.responseSample.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val history by viewModel.triggerHistory.collectAsStateWithLifecycle()
+    val isMonitoringActive by viewModel.isMonitoringActive.collectAsStateWithLifecycle()
 
     val monitorStatus by viewModel.monitorStatus.collectAsStateWithLifecycle()
     val isServiceRunning by viewModel.isServiceRunning.collectAsStateWithLifecycle()
@@ -124,6 +128,17 @@ fun MainScreen(viewModel: HadiCareViewModel) {
     var selectedTab by remember { mutableStateOf(NavigationTab.HOME) }
     var recordingDialogSampleNumber by remember { mutableStateOf<Int?>(null) }
     var pickingSampleNumber by remember { mutableStateOf<Int?>(null) }
+    var isSampleManagerOpen by remember { mutableStateOf(false) }
+
+    // Auto-start listening on app launch / restart if monitoring toggle was previously ON
+    LaunchedEffect(Unit) {
+        if (isMonitoringActive && !isServiceRunning) {
+            val recordAudioPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            if (recordAudioPerm == PackageManager.PERMISSION_GRANTED) {
+                viewModel.startMonitoring(context)
+            }
+        }
+    }
 
     // Audio file picker launcher
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -132,12 +147,13 @@ fun MainScreen(viewModel: HadiCareViewModel) {
         uri?.let {
             val fileName = queryFileName(context, it) ?: "audio_file.mp3"
             val isTrigger = pickingSampleNumber == 1
-            viewModel.saveAudioFileFromPicker(it, isTrigger, fileName)
-            Toast.makeText(
-                context,
-                "Loaded ${if (isTrigger) "Sample 1" else "Sample 2"}: $fileName",
-                Toast.LENGTH_SHORT
-            ).show()
+            if (isTrigger) {
+                viewModel.addCustomTriggerSampleFromUri(it, fileName)
+                Toast.makeText(context, "Added Baby Voice Sample: $fileName 💕", Toast.LENGTH_SHORT).show()
+            } else {
+                viewModel.saveAudioFileFromPicker(it, false, fileName)
+                Toast.makeText(context, "Loaded Response Lullaby: $fileName 🎵", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -358,7 +374,9 @@ fun MainScreen(viewModel: HadiCareViewModel) {
                                 subtitle = "Baby voice, cry, or recorded audio",
                                 icon = Icons.Default.Hearing,
                                 sampleInfo = triggerSample,
-                                isPlayingPreview = playingPreviewId == "trigger",
+                                isPlayingPreview = playingPreviewId == triggerSample.id || playingPreviewId == "trigger",
+                                sampleCount = triggerSamples.size,
+                                onManageSamples = { isSampleManagerOpen = true },
                                 onPickFile = {
                                     pickingSampleNumber = 1
                                     filePickerLauncher.launch(arrayOf("audio/*", "application/ogg"))
@@ -367,11 +385,11 @@ fun MainScreen(viewModel: HadiCareViewModel) {
                                     recordingDialogSampleNumber = 1
                                 },
                                 onUsePreset = {
-                                    viewModel.useDefaultTriggerSample()
+                                    viewModel.addPresetTriggerSample()
                                     Toast.makeText(context, "Loaded Infant Cry Preset", Toast.LENGTH_SHORT).show()
                                 },
                                 onTogglePreview = {
-                                    viewModel.togglePlayPreview("trigger", triggerSample.filePath)
+                                    viewModel.togglePlayPreview(triggerSample.id, triggerSample.filePath)
                                 }
                             )
 
@@ -453,12 +471,51 @@ fun MainScreen(viewModel: HadiCareViewModel) {
             sampleNumber = sampleNum,
             isTrigger = isTrigger,
             onAudioRecorded = { file, title ->
-                viewModel.saveRecordedAudio(file, isTrigger, title)
+                if (isTrigger) {
+                    viewModel.addRecordedTriggerSample(file, title)
+                } else {
+                    viewModel.saveRecordedAudio(file, false, title)
+                }
                 Toast.makeText(context, "Saved: $title 💕", Toast.LENGTH_SHORT).show()
                 recordingDialogSampleNumber = null
             },
             onDismiss = {
                 recordingDialogSampleNumber = null
+            }
+        )
+    }
+
+    // Baby Voice Samples Manager Dialog / Window
+    if (isSampleManagerOpen) {
+        SampleManagerDialog(
+            samples = triggerSamples,
+            playingPreviewId = playingPreviewId,
+            onPlayPreview = { sampleId, path ->
+                viewModel.togglePlayPreview(sampleId, path)
+            },
+            onDeleteSample = { sampleId ->
+                viewModel.deleteTriggerSample(sampleId)
+                Toast.makeText(context, "Sample deleted", Toast.LENGTH_SHORT).show()
+            },
+            onRecordNew = {
+                recordingDialogSampleNumber = 1
+            },
+            onAddFromFile = {
+                pickingSampleNumber = 1
+                filePickerLauncher.launch(arrayOf("audio/*", "application/ogg"))
+            },
+            onAddPreset = {
+                viewModel.addPresetTriggerSample()
+                Toast.makeText(context, "Preset cry sample added 💕", Toast.LENGTH_SHORT).show()
+            },
+            onPauseListening = {
+                viewModel.pauseMonitoringForManager(context)
+            },
+            onResumeListening = {
+                viewModel.resumeMonitoringAfterManager(context)
+            },
+            onDismiss = {
+                isSampleManagerOpen = false
             }
         )
     }
