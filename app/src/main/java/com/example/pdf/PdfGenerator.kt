@@ -33,6 +33,35 @@ class PdfGenerator(private val context: Context) {
     }
 
     /**
+     * Renders the CV into an exact high-resolution Bitmap for pixel-perfect preview matching the PDF.
+     */
+    fun renderCvToBitmap(cv: CVData, scale: Float = 2.0f): Bitmap {
+        val width = (PAGE_WIDTH * scale).toInt()
+        val height = (PAGE_HEIGHT * scale).toInt()
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        canvas.scale(scale, scale)
+        renderTemplateToCanvas(canvas, cv, cv.getActiveTemplate())
+        return bitmap
+    }
+
+    /**
+     * Renders the CV onto any canvas (PDF or Bitmap) with identical coordinates, fonts, and spacing.
+     */
+    fun renderTemplateToCanvas(canvas: Canvas, cv: CVData, template: TemplateInfo) {
+        when (template.layoutStyle) {
+            LayoutStyle.SIDEBAR_LEFT -> drawSidebarLeftTemplate(canvas, cv, template)
+            LayoutStyle.SIDEBAR_RIGHT -> drawSidebarRightTemplate(canvas, cv, template)
+            LayoutStyle.HEADER_BANNER -> drawHeaderBannerTemplate(canvas, cv, template)
+            LayoutStyle.CLASSIC_CENTERED -> drawClassicCenteredTemplate(canvas, cv, template)
+            LayoutStyle.TWO_COLUMN_GRID -> drawTwoColumnGridTemplate(canvas, cv, template)
+            LayoutStyle.TIMELINE_ACCENT -> drawTimelineAccentTemplate(canvas, cv, template)
+            LayoutStyle.MINIMAL_BORDER -> drawMinimalBorderTemplate(canvas, cv, template)
+        }
+    }
+
+    /**
      * Generates a standard A4 PDF document based on user input and selected template.
      */
     fun generatePdf(cv: CVData): Result<File> {
@@ -43,16 +72,8 @@ class PdfGenerator(private val context: Context) {
             val page = document.startPage(pageInfo)
             val canvas = page.canvas
 
-            // Render according to the template's layout style
-            when (template.layoutStyle) {
-                LayoutStyle.SIDEBAR_LEFT -> drawSidebarLeftTemplate(canvas, cv, template)
-                LayoutStyle.SIDEBAR_RIGHT -> drawSidebarRightTemplate(canvas, cv, template)
-                LayoutStyle.HEADER_BANNER -> drawHeaderBannerTemplate(canvas, cv, template)
-                LayoutStyle.CLASSIC_CENTERED -> drawClassicCenteredTemplate(canvas, cv, template)
-                LayoutStyle.TWO_COLUMN_GRID -> drawTwoColumnGridTemplate(canvas, cv, template)
-                LayoutStyle.TIMELINE_ACCENT -> drawTimelineAccentTemplate(canvas, cv, template)
-                LayoutStyle.MINIMAL_BORDER -> drawMinimalBorderTemplate(canvas, cv, template)
-            }
+            // Render identical layout to PDF canvas
+            renderTemplateToCanvas(canvas, cv, template)
 
             document.finishPage(page)
 

@@ -149,7 +149,7 @@ fun QuickCVApp() {
                         navController.navigate("saved")
                     },
                     onLoadSampleClick = {
-                        cvViewModel.loadSampleData()
+                        cvViewModel.loadSampleData(context)
                         navController.navigate("preview")
                     }
                 )
@@ -185,11 +185,11 @@ fun QuickCVApp() {
                         }
                     },
                     onEditCV = { cv ->
-                        cvViewModel.loadCV(cv)
+                        cvViewModel.loadCV(cv, context)
                         navController.navigate("form")
                     },
                     onPreviewCV = { cv ->
-                        cvViewModel.loadCV(cv)
+                        cvViewModel.loadCV(cv, context)
                         navController.navigate("preview")
                     },
                     onCreateNew = {

@@ -7,13 +7,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,11 +32,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,8 +47,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,31 +70,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.rememberAsyncImagePainter
-import com.example.data.model.CVData
-import com.example.data.model.FontStyleType
-import com.example.data.model.LayoutStyle
 import com.example.data.model.TemplateCategory
-import com.example.data.model.TemplateInfo
 import com.example.data.model.TemplateRegistry
 import com.example.pdf.PdfGenerator
 import com.example.ui.theme.EmeraldContainer
 import com.example.ui.theme.EmeraldPrimary
-import com.example.ui.theme.GoldTertiary
 import com.example.ui.viewmodel.CVViewModel
 import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PreviewScreen(
     viewModel: CVViewModel,
@@ -105,12 +101,21 @@ fun PreviewScreen(
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     val searchQuery by viewModel.templateSearchQuery.collectAsStateWithLifecycle()
 
+    val previewBitmap by viewModel.previewBitmap.collectAsStateWithLifecycle()
+    val isPreviewLoading by viewModel.isPreviewLoading.collectAsStateWithLifecycle()
+
     val currentTemplate = cvData.getActiveTemplate()
     val filteredTemplates = viewModel.getFilteredTemplates()
 
     var showSuccessDialog by remember { mutableStateOf(false) }
     var generatedFileForDialog by remember { mutableStateOf<File?>(null) }
     var showColorPicker by remember { mutableStateOf(false) }
+    var isZoomMode by remember { mutableStateOf(false) }
+
+    // Trigger initial preview generation
+    LaunchedEffect(cvData.templateId, cvData.customAccentHex) {
+        viewModel.refreshPreview(context)
+    }
 
     val accentPresets = listOf(
         0xFF0F5132L to "Emerald",
@@ -129,8 +134,8 @@ fun PreviewScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Template Gallery & Preview", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text("${TemplateRegistry.templates.size} World-Class Designs", fontSize = 11.sp, color = Color.Gray)
+                        Text("WYSIWYG A4 Preview", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("${currentTemplate.name} • 100% Identical to PDF", fontSize = 11.sp, color = EmeraldPrimary)
                     }
                 },
                 navigationIcon = {
@@ -189,7 +194,7 @@ fun PreviewScreen(
                             } else {
                                 Icon(Icons.Default.Download, contentDescription = "Download")
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Save A4 PDF", fontWeight = FontWeight.Bold)
+                                Text("Download Exact PDF", fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -229,7 +234,7 @@ fun PreviewScreen(
                 .padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Optional Color Override Palette
+            // Color Override Palette
             if (showColorPicker) {
                 item {
                     Card(
@@ -248,7 +253,9 @@ fun PreviewScreen(
                                         text = "Reset to Default",
                                         fontSize = 11.sp,
                                         color = EmeraldPrimary,
-                                        modifier = Modifier.clickable { viewModel.setCustomAccent(null) }
+                                        modifier = Modifier.clickable {
+                                            viewModel.setCustomAccent(null, context)
+                                        }
                                     )
                                 }
                             }
@@ -269,7 +276,9 @@ fun PreviewScreen(
                                                 color = if (isSelected) Color.White else Color.Transparent,
                                                 shape = CircleShape
                                             )
-                                            .clickable { viewModel.setCustomAccent(colorHex) },
+                                            .clickable {
+                                                viewModel.setCustomAccent(colorHex, context)
+                                            },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (isSelected) {
@@ -288,7 +297,7 @@ fun PreviewScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { viewModel.setTemplateSearchQuery(it) },
-                    placeholder = { Text("Search 44+ templates (e.g. Emerald, Harvard, Dev, PPSC)...") },
+                    placeholder = { Text("Search 44+ templates (e.g. Emerald, Harvard, Tech)...") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
@@ -315,7 +324,7 @@ fun PreviewScreen(
             // Template Carousel Cards
             item {
                 Text(
-                    text = "${filteredTemplates.size} Templates Available • Tap to Preview",
+                    text = "${filteredTemplates.size} Templates Available • Tap to Preview Instantly",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -329,7 +338,9 @@ fun PreviewScreen(
                     items(filteredTemplates, key = { it.id }) { template ->
                         val isSelected = cvData.templateId == template.id
                         ElevatedCard(
-                            onClick = { viewModel.selectTemplate(template.id) },
+                            onClick = {
+                                viewModel.selectTemplate(template.id, context)
+                            },
                             modifier = Modifier
                                 .width(150.dp)
                                 .testTag("template_card_${template.id}"),
@@ -392,49 +403,126 @@ fun PreviewScreen(
                 }
             }
 
-            // Real-Time Scaled Document Preview
+            // Live Pixel-Perfect WYSIWYG A4 Preview
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Live A4 Preview: ${currentTemplate.name}",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                    )
-                    Surface(
-                        color = EmeraldContainer,
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
+                    Column {
                         Text(
-                            text = "A4 Page (595x842)",
-                            color = EmeraldPrimary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            text = "Exact A4 Output Preview",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
+                        Text(
+                            text = "Rendered with real PDF vector canvas",
+                            fontSize = 10.5.sp,
+                            color = Color.Gray
+                        )
+                    }
+
+                    // Mode Toggle: Fit to screen vs Zoom
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.clickable { isZoomMode = !isZoomMode }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isZoomMode) Icons.Default.FitScreen else Icons.Default.ZoomIn,
+                                contentDescription = "Toggle Zoom",
+                                modifier = Modifier.size(16.dp),
+                                tint = EmeraldPrimary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isZoomMode) "Fit Page" else "Zoom 100%",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldPrimary
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
 
+                // The Paper Sheet Container
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .shadow(6.dp, RoundedCornerShape(8.dp))
+                        .shadow(8.dp, RoundedCornerShape(8.dp))
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.White)
-                        .border(1.dp, Color(0xFFD0D7DE), RoundedCornerShape(8.dp))
-                        .padding(10.dp)
+                        .border(1.dp, Color(0xFFD0D7DE), RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    when (currentTemplate.layoutStyle) {
-                        LayoutStyle.SIDEBAR_LEFT -> UniversalSidebarPreview(cv = cvData, template = currentTemplate, isSidebarLeft = true)
-                        LayoutStyle.SIDEBAR_RIGHT -> UniversalSidebarPreview(cv = cvData, template = currentTemplate, isSidebarLeft = false)
-                        LayoutStyle.HEADER_BANNER -> UniversalBannerPreview(cv = cvData, template = currentTemplate)
-                        LayoutStyle.CLASSIC_CENTERED -> UniversalClassicPreview(cv = cvData, template = currentTemplate)
-                        LayoutStyle.TWO_COLUMN_GRID -> UniversalGridPreview(cv = cvData, template = currentTemplate)
-                        LayoutStyle.TIMELINE_ACCENT -> UniversalTimelinePreview(cv = cvData, template = currentTemplate)
-                        LayoutStyle.MINIMAL_BORDER -> UniversalMinimalBorderPreview(cv = cvData, template = currentTemplate)
+                    if (previewBitmap != null) {
+                        if (isZoomMode) {
+                            // Zoom & Read Mode: horizontal + vertical scrollable at native full crispness
+                            val hScrollState = rememberScrollState()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(hScrollState)
+                            ) {
+                                Image(
+                                    bitmap = previewBitmap!!.asImageBitmap(),
+                                    contentDescription = "A4 Page Full Detail",
+                                    modifier = Modifier
+                                        .width(595.dp)
+                                        .height(842.dp),
+                                    contentScale = ContentScale.FillBounds
+                                )
+                            }
+                        } else {
+                            // Fit Page Mode: standard A4 proportion 595:842
+                            Image(
+                                bitmap = previewBitmap!!.asImageBitmap(),
+                                contentDescription = "A4 Page Fitted Preview",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(595f / 842f),
+                                    contentScale = ContentScale.Fit
+                            )
+                        }
+                    } else {
+                        // Loading skeleton with standard A4 ratio
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(595f / 842f)
+                                .background(Color(0xFFFAFAFA)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = EmeraldPrimary, strokeWidth = 2.5.dp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Rendering exact A4 layout...", fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+
+                    if (isPreviewLoading) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.White.copy(alpha = 0.9f),
+                            shadowElevation = 4.dp,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(12.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .padding(6.dp)
+                                    .size(18.dp),
+                                color = EmeraldPrimary,
+                                strokeWidth = 2.dp
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -457,12 +545,12 @@ fun PreviewScreen(
                 )
             },
             title = {
-                Text("A4 PDF Generated Successfully!", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text("Exact A4 PDF Generated!", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             },
             text = {
                 Column {
                     Text(
-                        text = "Your resume has been saved using template \"${currentTemplate.name}\" and is ready to share on WhatsApp or print.",
+                        text = "Your resume has been saved with the exact design, spacing, and styling you previewed on screen.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -513,483 +601,5 @@ fun PreviewScreen(
                 }
             }
         )
-    }
-}
-
-// =========================================================================
-// REAL-TIME PREVIEW RENDERERS FOR ALL LAYOUT STYLES
-// =========================================================================
-
-@Composable
-fun UniversalSidebarPreview(cv: CVData, template: TemplateInfo, isSidebarLeft: Boolean) {
-    val primaryColor = Color(cv.customAccentHex ?: template.primaryColorHex)
-    val accentColor = Color(template.accentColorHex)
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(520.dp)
-    ) {
-        val sidebarContent = @Composable {
-            Column(
-                modifier = Modifier
-                    .width(110.dp)
-                    .fillMaxSize()
-                    .background(primaryColor)
-                    .padding(8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                if (cv.photoUri != null) {
-                    Image(
-                        painter = rememberAsyncImagePainter(cv.photoUri),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .border(1.5.dp, Color.White, CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = cv.fullName.take(2).uppercase(),
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("CONTACT", color = accentColor, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
-                HorizontalDivider(color = Color.White.copy(alpha = 0.3f), thickness = 0.5.dp)
-                Spacer(modifier = Modifier.height(3.dp))
-                if (cv.phone.isNotBlank()) Text(cv.phone, color = Color.White, fontSize = 6.5.sp)
-                if (cv.email.isNotBlank()) Text(cv.email, color = Color.White, fontSize = 6.5.sp, maxLines = 1)
-                if (cv.city.isNotBlank()) Text(cv.city, color = Color.White, fontSize = 6.5.sp)
-                if (cv.cnic.isNotBlank()) Text(cv.cnic, color = Color.White, fontSize = 6.sp)
-
-                Spacer(modifier = Modifier.height(8.dp))
-                if (cv.skills.isNotEmpty()) {
-                    Text("SKILLS", color = accentColor, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.3f), thickness = 0.5.dp)
-                    Spacer(modifier = Modifier.height(3.dp))
-                    cv.skills.take(5).forEach { skill ->
-                        Text("• $skill", color = Color.White, fontSize = 6.5.sp, maxLines = 1)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                if (cv.languages.isNotEmpty()) {
-                    Text("LANGUAGES", color = accentColor, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.3f), thickness = 0.5.dp)
-                    Spacer(modifier = Modifier.height(3.dp))
-                    cv.languages.take(3).forEach { lang ->
-                        Text("• $lang", color = Color.White, fontSize = 6.5.sp, maxLines = 1)
-                    }
-                }
-            }
-        }
-
-        val mainContent = @Composable {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
-                    .padding(10.dp)
-            ) {
-                Text(
-                    text = cv.fullName.ifBlank { "Candidate Name" },
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = primaryColor
-                )
-                Text(
-                    text = cv.jobTitle.ifBlank { "Target Title" }.uppercase(),
-                    fontSize = 8.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Gray
-                )
-                Box(
-                    modifier = Modifier
-                        .width(40.dp)
-                        .height(2.dp)
-                        .background(accentColor)
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                if (cv.objective.isNotBlank()) {
-                    Text("SUMMARY", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                    HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 0.5.dp)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(cv.objective, fontSize = 7.sp, color = Color.DarkGray, maxLines = 3)
-                    Spacer(modifier = Modifier.height(5.dp))
-                }
-
-                if (!cv.isFreshGraduate && cv.experiences.any { it.jobTitle.isNotBlank() }) {
-                    Text("EXPERIENCE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                    HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 0.5.dp)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    cv.experiences.take(2).forEach { exp ->
-                        if (exp.jobTitle.isNotBlank()) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(exp.jobTitle, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
-                                Text(exp.duration, fontSize = 6.5.sp, color = Color.Gray)
-                            }
-                            Text(exp.company, fontSize = 7.sp, color = primaryColor)
-                            if (exp.description.isNotBlank()) {
-                                Text(exp.description, fontSize = 6.5.sp, color = Color.DarkGray, maxLines = 2)
-                            }
-                            Spacer(modifier = Modifier.height(3.dp))
-                        }
-                    }
-                }
-
-                if (cv.projects.isNotEmpty()) {
-                    Text("PROJECTS", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                    HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 0.5.dp)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    cv.projects.take(2).forEach { proj ->
-                        Text("${proj.title} (${proj.techStack})", fontSize = 7.sp, fontWeight = FontWeight.Bold)
-                        if (proj.description.isNotBlank()) {
-                            Text(proj.description, fontSize = 6.5.sp, color = Color.DarkGray, maxLines = 1)
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                    }
-                }
-
-                if (cv.educations.any { it.degree.isNotBlank() }) {
-                    Text("EDUCATION", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                    HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 0.5.dp)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    cv.educations.take(2).forEach { edu ->
-                        if (edu.degree.isNotBlank()) {
-                            Text("${edu.degree} - ${edu.institute} (${edu.passingYear})", fontSize = 7.sp)
-                            Spacer(modifier = Modifier.height(2.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        if (isSidebarLeft) {
-            sidebarContent()
-            mainContent()
-        } else {
-            mainContent()
-            sidebarContent()
-        }
-    }
-}
-
-@Composable
-fun UniversalBannerPreview(cv: CVData, template: TemplateInfo) {
-    val primaryColor = Color(cv.customAccentHex ?: template.primaryColorHex)
-    val accentColor = Color(template.accentColorHex)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(520.dp)
-    ) {
-        // Banner
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(primaryColor)
-                .padding(10.dp)
-        ) {
-            Column {
-                Text(cv.fullName.ifBlank { "Full Name" }, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Text(cv.jobTitle.ifBlank { "Professional" }, fontSize = 8.5.sp, color = Color.White.copy(alpha = 0.85f))
-                val contacts = listOfNotNull(cv.phone, cv.email, cv.city).filter { it.isNotBlank() }.joinToString(" • ")
-                Text(contacts, fontSize = 7.sp, color = Color.White.copy(alpha = 0.75f))
-            }
-        }
-        Box(modifier = Modifier.fillMaxWidth().height(2.5.dp).background(accentColor))
-
-        Column(modifier = Modifier.padding(10.dp)) {
-            if (cv.objective.isNotBlank()) {
-                Text("SUMMARY", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 0.5.dp)
-                Text(cv.objective, fontSize = 7.sp, color = Color.DarkGray, maxLines = 3)
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-
-            if (!cv.isFreshGraduate && cv.experiences.any { it.jobTitle.isNotBlank() }) {
-                Text("EXPERIENCE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 0.5.dp)
-                cv.experiences.take(2).forEach { exp ->
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(exp.jobTitle, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
-                        Text(exp.duration, fontSize = 6.5.sp, color = Color.Gray)
-                    }
-                    Text(exp.company, fontSize = 7.sp, color = primaryColor)
-                    Spacer(modifier = Modifier.height(3.dp))
-                }
-            }
-
-            if (cv.educations.any { it.degree.isNotBlank() }) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("EDUCATION", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 0.5.dp)
-                cv.educations.take(2).forEach { edu ->
-                    Text("${edu.degree} — ${edu.institute} (${edu.passingYear})", fontSize = 7.sp)
-                }
-            }
-
-            if (cv.skills.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("SKILLS", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 0.5.dp)
-                Text(cv.skills.joinToString("  •  "), fontSize = 7.sp, color = Color.DarkGray)
-            }
-        }
-    }
-}
-
-@Composable
-fun UniversalClassicPreview(cv: CVData, template: TemplateInfo) {
-    val primaryColor = Color(cv.customAccentHex ?: template.primaryColorHex)
-    val accentColor = Color(template.accentColorHex)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(520.dp)
-            .padding(12.dp)
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = cv.fullName.ifBlank { "Full Name" }.uppercase(),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Serif,
-                color = primaryColor
-            )
-            Text(
-                text = cv.jobTitle.ifBlank { "Curriculum Vitae" },
-                fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = accentColor
-            )
-            val contacts = listOfNotNull(cv.phone, cv.email, cv.city, cv.cnic).filter { it.isNotBlank() }.joinToString(" | ")
-            Text(contacts, fontSize = 7.sp, color = Color.Gray)
-            Spacer(modifier = Modifier.height(3.dp))
-            HorizontalDivider(color = primaryColor, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(1.5.dp))
-            HorizontalDivider(color = Color.Gray, thickness = 0.5.dp)
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        if (cv.objective.isNotBlank()) {
-            Text("EXECUTIVE SUMMARY", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-            HorizontalDivider(color = accentColor, thickness = 0.8.dp)
-            Text(cv.objective, fontSize = 7.sp, color = Color.DarkGray, maxLines = 3)
-            Spacer(modifier = Modifier.height(6.dp))
-        }
-
-        if (!cv.isFreshGraduate && cv.experiences.any { it.jobTitle.isNotBlank() }) {
-            Text("EXPERIENCE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-            HorizontalDivider(color = accentColor, thickness = 0.8.dp)
-            cv.experiences.take(2).forEach { exp ->
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(exp.jobTitle, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
-                    Text(exp.duration, fontSize = 6.5.sp, color = Color.Gray)
-                }
-                Text(exp.company, fontSize = 7.sp, color = primaryColor)
-                Spacer(modifier = Modifier.height(3.dp))
-            }
-        }
-
-        if (cv.educations.any { it.degree.isNotBlank() }) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("EDUCATION", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-            HorizontalDivider(color = accentColor, thickness = 0.8.dp)
-            cv.educations.take(2).forEach { edu ->
-                Text("${edu.degree} — ${edu.institute} (${edu.passingYear})", fontSize = 7.sp)
-            }
-        }
-
-        if (cv.skills.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text("CORE COMPETENCIES", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-            HorizontalDivider(color = accentColor, thickness = 0.8.dp)
-            Text(cv.skills.joinToString("  •  "), fontSize = 7.sp, color = Color.DarkGray)
-        }
-    }
-}
-
-@Composable
-fun UniversalGridPreview(cv: CVData, template: TemplateInfo) {
-    val primaryColor = Color(cv.customAccentHex ?: template.primaryColorHex)
-    val accentColor = Color(template.accentColorHex)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(520.dp)
-            .padding(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(cv.fullName.ifBlank { "Full Name" }, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                Text(cv.jobTitle.ifBlank { "Professional" }, fontSize = 8.5.sp, color = accentColor, fontWeight = FontWeight.Bold)
-            }
-            Text(cv.phone + "\n" + cv.email, fontSize = 6.5.sp, color = Color.Gray, textAlign = TextAlign.Right)
-        }
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = Color(0xFFD0D0D0))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Column(modifier = Modifier.weight(0.58f)) {
-                if (cv.objective.isNotBlank()) {
-                    Text("SUMMARY", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                    Text(cv.objective, fontSize = 6.5.sp, color = Color.DarkGray, maxLines = 4)
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
-                if (!cv.isFreshGraduate && cv.experiences.any { it.jobTitle.isNotBlank() }) {
-                    Text("EXPERIENCE", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                    cv.experiences.take(2).forEach { exp ->
-                        Text(exp.jobTitle, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-                        Text("${exp.company} (${exp.duration})", fontSize = 6.5.sp, color = Color.Gray)
-                        Spacer(modifier = Modifier.height(3.dp))
-                    }
-                }
-            }
-
-            Column(modifier = Modifier.weight(0.42f)) {
-                if (cv.educations.any { it.degree.isNotBlank() }) {
-                    Text("EDUCATION", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                    cv.educations.take(2).forEach { edu ->
-                        Text("${edu.degree} - ${edu.institute}", fontSize = 6.5.sp)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
-                if (cv.skills.isNotEmpty()) {
-                    Text("SKILLS", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                    cv.skills.take(5).forEach { skill ->
-                        Text("▪ $skill", fontSize = 6.5.sp, color = Color.DarkGray)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun UniversalTimelinePreview(cv: CVData, template: TemplateInfo) {
-    val primaryColor = Color(cv.customAccentHex ?: template.primaryColorHex)
-    val accentColor = Color(template.accentColorHex)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(520.dp)
-            .padding(10.dp)
-    ) {
-        Text(cv.fullName.ifBlank { "Full Name" }, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-        Text(cv.jobTitle.ifBlank { "Developer" }, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = accentColor)
-        val contacts = listOfNotNull(cv.phone, cv.email, cv.city).filter { it.isNotBlank() }.joinToString(" • ")
-        Text(contacts, fontSize = 7.sp, color = Color.Gray)
-        Spacer(modifier = Modifier.height(6.dp))
-
-        if (cv.objective.isNotBlank()) {
-            Text("PROFILE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-            Text(cv.objective, fontSize = 7.sp, color = Color.DarkGray, maxLines = 3)
-            Spacer(modifier = Modifier.height(6.dp))
-        }
-
-        Text("TIMELINE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-        HorizontalDivider(color = accentColor, thickness = 0.8.dp)
-        Spacer(modifier = Modifier.height(4.dp))
-
-        if (!cv.isFreshGraduate && cv.experiences.any { it.jobTitle.isNotBlank() }) {
-            cv.experiences.take(3).forEach { exp ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(accentColor))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("${exp.jobTitle} @ ${exp.company} (${exp.duration})", fontSize = 7.sp, fontWeight = FontWeight.Medium)
-                }
-                Spacer(modifier = Modifier.height(3.dp))
-            }
-        }
-
-        if (cv.educations.any { it.degree.isNotBlank() }) {
-            cv.educations.take(2).forEach { edu ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(primaryColor))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("${edu.degree} - ${edu.institute} (${edu.passingYear})", fontSize = 7.sp)
-                }
-                Spacer(modifier = Modifier.height(3.dp))
-            }
-        }
-    }
-}
-
-@Composable
-fun UniversalMinimalBorderPreview(cv: CVData, template: TemplateInfo) {
-    val primaryColor = Color(cv.customAccentHex ?: template.primaryColorHex)
-    val accentColor = Color(template.accentColorHex)
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(520.dp)
-            .border(1.dp, Color(0xFFD0D7DE), RoundedCornerShape(4.dp))
-            .padding(10.dp)
-    ) {
-        Column {
-            Text(cv.fullName.ifBlank { "Full Name" }, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-            Text(cv.jobTitle.ifBlank { "Candidate" }, fontSize = 8.5.sp, color = accentColor)
-            val contacts = listOfNotNull(cv.phone, cv.email, cv.city).filter { it.isNotBlank() }.joinToString(" | ")
-            Text(contacts, fontSize = 7.sp, color = Color.Gray)
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = Color(0xFFE0E0E0))
-
-            if (cv.objective.isNotBlank()) {
-                Text("SUMMARY", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                Text(cv.objective, fontSize = 6.5.sp, color = Color.DarkGray, maxLines = 3)
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            if (!cv.isFreshGraduate && cv.experiences.any { it.jobTitle.isNotBlank() }) {
-                Text("EXPERIENCE", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                cv.experiences.take(2).forEach { exp ->
-                    Text("${exp.jobTitle} - ${exp.company} (${exp.duration})", fontSize = 6.5.sp)
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            if (cv.educations.any { it.degree.isNotBlank() }) {
-                Text("EDUCATION", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                cv.educations.take(2).forEach { edu ->
-                    Text("${edu.degree} - ${edu.institute} (${edu.passingYear})", fontSize = 6.5.sp)
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            if (cv.skills.isNotEmpty()) {
-                Text("SKILLS", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                Text(cv.skills.joinToString(", "), fontSize = 6.5.sp, color = Color.DarkGray)
-            }
-        }
     }
 }

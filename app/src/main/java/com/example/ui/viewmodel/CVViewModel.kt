@@ -14,6 +14,8 @@ import com.example.data.model.TemplateInfo
 import com.example.data.model.TemplateRegistry
 import com.example.data.repository.CVRepository
 import com.example.pdf.PdfGenerator
+import android.graphics.Bitmap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,12 +23,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class CVViewModel(private val repository: CVRepository) : ViewModel() {
 
     private val _currentCV = MutableStateFlow(CVData())
     val currentCV: StateFlow<CVData> = _currentCV.asStateFlow()
+
+    private val _previewBitmap = MutableStateFlow<Bitmap?>(null)
+    val previewBitmap: StateFlow<Bitmap?> = _previewBitmap.asStateFlow()
+
+    private val _isPreviewLoading = MutableStateFlow(false)
+    val isPreviewLoading: StateFlow<Boolean> = _isPreviewLoading.asStateFlow()
 
     private val _selectedCategory = MutableStateFlow(TemplateCategory.ALL)
     val selectedCategory: StateFlow<TemplateCategory> = _selectedCategory.asStateFlow()
@@ -39,6 +48,22 @@ class CVViewModel(private val repository: CVRepository) : ViewModel() {
 
     private val _lastGeneratedFile = MutableStateFlow<File?>(null)
     val lastGeneratedFile: StateFlow<File?> = _lastGeneratedFile.asStateFlow()
+
+    fun refreshPreview(context: Context) {
+        viewModelScope.launch {
+            _isPreviewLoading.value = true
+            val bitmap = withContext(Dispatchers.Default) {
+                try {
+                    val generator = PdfGenerator(context)
+                    generator.renderCvToBitmap(_currentCV.value, 1.8f)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            _previewBitmap.value = bitmap
+            _isPreviewLoading.value = false
+        }
+    }
 
     val savedCVs: StateFlow<List<CVData>> = repository.allCVs
         .stateIn(
@@ -246,12 +271,14 @@ class CVViewModel(private val repository: CVRepository) : ViewModel() {
         }
     }
 
-    fun selectTemplate(templateId: String) {
+    fun selectTemplate(templateId: String, context: Context? = null) {
         _currentCV.update { it.copy(templateId = templateId) }
+        if (context != null) refreshPreview(context)
     }
 
-    fun setCustomAccent(colorHex: Long?) {
+    fun setCustomAccent(colorHex: Long?, context: Context? = null) {
         _currentCV.update { it.copy(customAccentHex = colorHex) }
+        if (context != null) refreshPreview(context)
     }
 
     fun saveCurrentCV(onComplete: ((Long) -> Unit)? = null) {
@@ -263,8 +290,9 @@ class CVViewModel(private val repository: CVRepository) : ViewModel() {
         }
     }
 
-    fun loadCV(cv: CVData) {
+    fun loadCV(cv: CVData, context: Context? = null) {
         _currentCV.value = cv
+        if (context != null) refreshPreview(context)
     }
 
     fun deleteCV(cv: CVData) {
@@ -276,9 +304,10 @@ class CVViewModel(private val repository: CVRepository) : ViewModel() {
     fun resetForm() {
         _currentCV.value = CVData()
         _lastGeneratedFile.value = null
+        _previewBitmap.value = null
     }
 
-    fun loadSampleData() {
+    fun loadSampleData(context: Context? = null) {
         _currentCV.value = CVData(
             title = "Muhammad Ali - Full Stack Developer",
             fullName = "Muhammad Ali Khan",
@@ -361,6 +390,7 @@ class CVViewModel(private val repository: CVRepository) : ViewModel() {
             languages = listOf("English (Professional)", "Urdu (Native)", "Punjabi (Conversational)"),
             templateId = "modern_emerald"
         )
+        if (context != null) refreshPreview(context)
     }
 
     fun generatePdf(context: Context, onResult: (Result<File>) -> Unit) {
