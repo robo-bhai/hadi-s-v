@@ -1,6 +1,6 @@
 {
-  "name": "Quick CV Maker",
-  "description": "Offline-first Quick CV Maker & Resume Builder tailored for Pakistani job seekers and students with A4 PDF export and multiple professional templates.",
+  "name": "Edit88",
+  "description": "Professional AI-powered video editor with multi-track timeline, Urdu Nastaliq typography, auto-captions, and Gemini creative tools.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

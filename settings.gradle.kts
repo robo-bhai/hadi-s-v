@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Quick CV Maker"
+rootProject.name = "Edit88"
 
 include(":app")
