@@ -1,6 +1,6 @@
 {
-  "name": "Hadi's Care",
-  "description": "Background audio listener & baby monitor that detects crying sounds and plays soothing lullabies automatically.",
+  "name": "Quick CV Maker",
+  "description": "Offline-first Quick CV Maker & Resume Builder tailored for Pakistani job seekers and students with A4 PDF export and multiple professional templates.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
