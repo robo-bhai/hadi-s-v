@@ -56,8 +56,10 @@ fun ColorAndFiltersSheet(
     var brightness by remember { mutableFloatStateOf(initialGrading.brightness) }
     var contrast by remember { mutableFloatStateOf(initialGrading.contrast) }
     var saturation by remember { mutableFloatStateOf(initialGrading.saturation) }
+    var exposure by remember { mutableFloatStateOf(initialGrading.exposure) }
     var temperature by remember { mutableFloatStateOf(initialGrading.temperature) }
     var vignette by remember { mutableFloatStateOf(initialGrading.vignette) }
+    var hue by remember { mutableFloatStateOf(initialGrading.hue) }
 
     Column(
         modifier = Modifier
@@ -101,8 +103,10 @@ fun ColorAndFiltersSheet(
                 brightness = 0f
                 contrast = 1f
                 saturation = 1f
+                exposure = 0f
                 temperature = 0f
                 vignette = 0f
+                hue = 0f
                 onApply(FilterType.NONE, ColorGrading())
             }) {
                 Icon(Icons.Default.RestartAlt, contentDescription = "Reset", tint = Color(0xFF94A3B8))
@@ -162,7 +166,7 @@ fun ColorAndFiltersSheet(
             formatValue = { "${(it * 100).toInt()}" },
             onValueChange = {
                 brightness = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, temperature, vignette))
+                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
             }
         )
 
@@ -173,7 +177,7 @@ fun ColorAndFiltersSheet(
             formatValue = { "${(it * 100).toInt()}%" },
             onValueChange = {
                 contrast = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, temperature, vignette))
+                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
             }
         )
 
@@ -184,7 +188,18 @@ fun ColorAndFiltersSheet(
             formatValue = { "${(it * 100).toInt()}%" },
             onValueChange = {
                 saturation = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, temperature, vignette))
+                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+            }
+        )
+
+        ColorSliderRow(
+            label = "Exposure",
+            value = exposure,
+            valueRange = -1.0f..1.0f,
+            formatValue = { if (it > 0) "+${(it * 100).toInt()}" else "${(it * 100).toInt()}" },
+            onValueChange = {
+                exposure = it
+                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
             }
         )
 
@@ -195,7 +210,7 @@ fun ColorAndFiltersSheet(
             formatValue = { if (it > 0) "+${(it * 100).toInt()}" else "${(it * 100).toInt()}" },
             onValueChange = {
                 temperature = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, temperature, vignette))
+                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
             }
         )
 
@@ -206,7 +221,18 @@ fun ColorAndFiltersSheet(
             formatValue = { "${(it * 100).toInt()}%" },
             onValueChange = {
                 vignette = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, temperature, vignette))
+                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+            }
+        )
+
+        ColorSliderRow(
+            label = "Hue Shift",
+            value = hue,
+            valueRange = -180f..180f,
+            formatValue = { "${it.toInt()}°" },
+            onValueChange = {
+                hue = it
+                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
             }
         )
 

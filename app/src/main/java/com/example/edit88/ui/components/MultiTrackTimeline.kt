@@ -57,11 +57,14 @@ import com.example.ui.theme.TrackOverlayColor
 import com.example.ui.theme.TrackSubtitleColor
 import com.example.ui.theme.TrackVideoColor
 
+import com.example.edit88.model.TransitionType
+
 @Composable
 fun MultiTrackTimeline(
     project: Project,
     currentPlayheadMs: Long,
     selectedClipId: String?,
+    timelineZoom: Float = 1.0f,
     onSelectClip: (String) -> Unit,
     onSeekTo: (Long) -> Unit,
     modifier: Modifier = Modifier
@@ -69,8 +72,8 @@ fun MultiTrackTimeline(
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
 
-    // Scale: 1000ms = 60dp
-    val msPerDp = 1000f / 60f
+    // Scale: 1000ms = 60dp (scaled by zoom)
+    val msPerDp = (1000f / 60f) / timelineZoom.coerceIn(0.5f, 3.0f)
     val totalDurationMs = project.totalDurationMs.coerceAtLeast(15000L)
     val timelineWidthDp = (totalDurationMs / msPerDp).dp
 
@@ -311,13 +314,25 @@ private fun VideoTrackRow(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = clip.title,
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                            if (clip.isLocalVideo) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF06B6D4), RoundedCornerShape(2.dp))
+                                        .padding(horizontal = 3.dp, vertical = 1.dp)
+                                ) {
+                                    Text("LOCAL", color = Color.Black, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
+                            Text(
+                                text = clip.title,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
                         if (clip.speed != 1.0f) {
                             Text(
                                 text = "${clip.speed}x",
@@ -326,6 +341,17 @@ private fun VideoTrackRow(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+                }
+                if (clip.transitionToNext != TransitionType.NONE) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .background(Color(0xFF0F172A), CircleShape)
+                            .border(1.dp, Color(0xFF38BDF8), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(clip.transitionToNext.iconEmoji, fontSize = 9.sp)
                     }
                 }
                 Spacer(modifier = Modifier.width(2.dp))

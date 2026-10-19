@@ -15,9 +15,13 @@ import com.example.edit88.model.MediaType
 import com.example.edit88.model.OverlayClip
 import com.example.edit88.model.Project
 import com.example.edit88.model.SubtitleClip
+import com.example.edit88.data.TemplatesRepository
+import com.example.edit88.model.SpeedCurvePreset
 import com.example.edit88.model.SubtitleStylePreset
 import com.example.edit88.model.TimedWord
+import com.example.edit88.model.TransitionType
 import com.example.edit88.model.UrduFontChoice
+import com.example.edit88.model.VideoTemplate
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +40,11 @@ enum class SheetType {
     AUDIO,
     FILTERS,
     EXPORT,
-    CLIP_EDIT
+    CLIP_EDIT,
+    TRANSITIONS,
+    STICKERS,
+    ADD_MEDIA,
+    SRT_EXPORT
 }
 
 data class EditorUiState(
@@ -47,7 +55,8 @@ data class EditorUiState(
     val activeSheet: SheetType = SheetType.NONE,
     val recentProjects: List<Project> = emptyList(),
     val canUndo: Boolean = false,
-    val canRedo: Boolean = false
+    val canRedo: Boolean = false,
+    val timelineZoom: Float = 1.0f
 )
 
 class VideoEditorViewModel(application: Application) : AndroidViewModel(application) {
@@ -256,6 +265,43 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun updateClipSpeedAndCurve(speed: Float, curve: SpeedCurvePreset) {
+        val selectedId = _uiState.value.selectedClipId ?: return
+        pushHistory()
+        val updated = _uiState.value.project.clips.map {
+            if (it.id == selectedId) it.copy(speed = speed, speedCurve = curve) else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(clips = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun updateOverlay(overlay: OverlayClip) {
+        val updated = _uiState.value.project.overlays.map {
+            if (it.id == overlay.id) overlay else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(overlays = updated))
+        }
+    }
+
+    fun deleteOverlay(overlayId: String) {
+        pushHistory()
+        val updated = _uiState.value.project.overlays.filter { it.id != overlayId }
+        _uiState.update {
+            it.copy(project = it.project.copy(overlays = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun updateSubtitlePosition(id: String, posX: Float, posY: Float, scale: Float) {
+        val updated = _uiState.value.project.subtitles.map {
+            if (it.id == id) it.copy(posX = posX, posY = posY, scale = scale) else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(subtitles = updated))
+        }
+    }
+
     fun addSubtitle(subtitleClip: SubtitleClip) {
         pushHistory()
         val updated = _uiState.value.project.subtitles + subtitleClip
@@ -314,6 +360,148 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
         val updated = _uiState.value.project.overlays + overlayClip
         _uiState.update {
             it.copy(project = it.project.copy(overlays = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun setTimelineZoom(zoom: Float) {
+        _uiState.update { it.copy(timelineZoom = zoom.coerceIn(0.5f, 3.0f)) }
+    }
+
+    fun addMediaClip(clip: MediaClip) {
+        pushHistory()
+        val updated = _uiState.value.project.clips + clip
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(clips = updated, updatedAt = System.currentTimeMillis()),
+                selectedClipId = clip.id
+            )
+        }
+    }
+
+    fun addMediaClips(clips: List<MediaClip>) {
+        if (clips.isEmpty()) return
+        pushHistory()
+        val updated = _uiState.value.project.clips + clips
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(clips = updated, updatedAt = System.currentTimeMillis()),
+                selectedClipId = clips.first().id
+            )
+        }
+    }
+
+    fun createProjectFromImportedClips(clips: List<MediaClip>, aspectRatio: AspectRatioType? = null) {
+        if (clips.isEmpty()) return
+        pause()
+        val resolvedRatio = aspectRatio ?: com.example.edit88.util.MediaImportHelper.detectBestAspectRatio(clips)
+        val firstClipTitle = clips.first().title
+        val projectTitle = if (clips.size == 1) firstClipTitle else "$firstClipTitle & ${clips.size - 1} clips"
+        val totalMs = clips.sumOf { it.effectiveDurationMs }
+
+        val newProj = Project(
+            title = projectTitle,
+            aspectRatio = resolvedRatio,
+            clips = clips,
+            subtitles = listOf(
+                SubtitleClip(
+                    text = "اپنے منفرد انداز میں بنائیں",
+                    startMs = 500L,
+                    endMs = minOf(4000L, totalMs),
+                    fontChoice = UrduFontChoice.NOTO_NASTALIQ,
+                    stylePreset = SubtitleStylePreset.KARAOKE,
+                    words = listOf(
+                        TimedWord("اپنے", 500L, 1200L),
+                        TimedWord("منفرد انداز", 1200L, 2600L),
+                        TimedWord("میں بنائیں", 2600L, minOf(4000L, totalMs))
+                    )
+                )
+            ),
+            audioTracks = listOf(
+                AudioTrack(
+                    name = "Vlog Beat Ambient",
+                    type = AudioType.BGM,
+                    durationMs = totalMs.coerceAtLeast(10000L),
+                    volume = 0.5f
+                )
+            )
+        )
+
+        undoStack.clear()
+        redoStack.clear()
+        _uiState.update {
+            it.copy(
+                project = newProj,
+                currentPlayheadMs = 0L,
+                selectedClipId = clips.first().id,
+                recentProjects = listOf(newProj) + it.recentProjects,
+                canUndo = false,
+                canRedo = false
+            )
+        }
+    }
+
+    fun applyTransition(transition: TransitionType, durationMs: Long, applyToAll: Boolean) {
+        pushHistory()
+        val selectedId = _uiState.value.selectedClipId
+        val updated = _uiState.value.project.clips.map { clip ->
+            if (applyToAll || clip.id == selectedId) {
+                clip.copy(transitionToNext = transition, transitionDurationMs = durationMs)
+            } else {
+                clip
+            }
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(clips = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun loadTemplate(template: VideoTemplate) {
+        pause()
+        val proj = TemplatesRepository.createProjectFromTemplate(template)
+        undoStack.clear()
+        redoStack.clear()
+        _uiState.update {
+            it.copy(
+                project = proj,
+                currentPlayheadMs = 0L,
+                selectedClipId = proj.clips.firstOrNull()?.id,
+                recentProjects = listOf(proj) + it.recentProjects.filter { p -> p.id != proj.id },
+                canUndo = false,
+                canRedo = false
+            )
+        }
+    }
+
+    fun loadProject(project: Project) {
+        pause()
+        undoStack.clear()
+        redoStack.clear()
+        _uiState.update {
+            it.copy(
+                project = project,
+                currentPlayheadMs = 0L,
+                selectedClipId = project.clips.firstOrNull()?.id,
+                canUndo = false,
+                canRedo = false
+            )
+        }
+    }
+
+    fun deleteProject(projectId: String) {
+        _uiState.update {
+            val filtered = it.recentProjects.filter { p -> p.id != projectId }
+            it.copy(recentProjects = filtered)
+        }
+    }
+
+    fun duplicateProject(project: Project) {
+        val copy = project.copy(
+            id = java.util.UUID.randomUUID().toString(),
+            title = "${project.title} (Copy)",
+            updatedAt = System.currentTimeMillis()
+        )
+        _uiState.update {
+            it.copy(recentProjects = listOf(copy) + it.recentProjects)
         }
     }
 

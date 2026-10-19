@@ -30,12 +30,23 @@ import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.ZoomIn
+import com.example.edit88.model.SpeedCurvePreset
+import com.example.edit88.model.TransitionType
+import com.example.edit88.ui.sheets.AddMediaSheet
+import com.example.edit88.ui.sheets.OverlayStickersSheet
+import com.example.edit88.ui.sheets.SpeedCurveSheet
+import com.example.edit88.ui.sheets.SrtExportSheet
+import com.example.edit88.ui.sheets.TransitionsSheet
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -104,6 +115,7 @@ fun EditorScreen(
                 canRedo = uiState.canRedo,
                 onBack = onNavigateBack,
                 onAspectClick = { showAspectMenu = true },
+                onImportClick = { viewModel.openSheet(SheetType.ADD_MEDIA) },
                 onUndo = { viewModel.undo() },
                 onRedo = { viewModel.redo() },
                 onExport = { viewModel.openSheet(SheetType.EXPORT) }
@@ -159,28 +171,35 @@ fun EditorScreen(
                     project = project,
                     currentPlayheadMs = uiState.currentPlayheadMs,
                     isPlaying = uiState.isPlaying,
-                    onTogglePlay = { viewModel.togglePlayPause() }
+                    onTogglePlay = { viewModel.togglePlayPause() },
+                    onUpdateOverlay = { viewModel.updateOverlay(it) },
+                    onDeleteOverlay = { viewModel.deleteOverlay(it) },
+                    onUpdateSubtitlePosition = { id, x, y, scale -> viewModel.updateSubtitlePosition(id, x, y, scale) }
                 )
             }
 
-            // 2. Playback Control Bar & Timecode
+            // 2. Playback Control Bar, Live Frame Counter & Zoom
             PlaybackBar(
                 currentMs = uiState.currentPlayheadMs,
                 totalMs = project.totalDurationMs,
+                timelineZoom = uiState.timelineZoom,
                 isPlaying = uiState.isPlaying,
                 onTogglePlay = { viewModel.togglePlayPause() },
-                onRewind = { viewModel.seekTo(0L) },
-                onForward = { viewModel.seekTo(project.totalDurationMs) }
+                onSetZoom = { viewModel.setTimelineZoom(it) }
             )
 
             // 3. Quick Clip Tools Floating Ribbon
             ClipActionRibbon(
                 selectedClipId = uiState.selectedClipId,
+                onAddClip = { viewModel.openSheet(SheetType.ADD_MEDIA) },
                 onSplit = { viewModel.splitClipAtPlayhead() },
                 onSpeed = { showSpeedDialog = true },
+                onTransition = { viewModel.openSheet(SheetType.TRANSITIONS) },
+                onStickers = { viewModel.openSheet(SheetType.STICKERS) },
                 onDuplicate = { viewModel.duplicateSelectedClip() },
                 onDelete = { viewModel.deleteSelectedClip() },
-                onFilter = { viewModel.openSheet(SheetType.FILTERS) }
+                onFilter = { viewModel.openSheet(SheetType.FILTERS) },
+                onExportSrt = { viewModel.openSheet(SheetType.SRT_EXPORT) }
             )
 
             // 4. Multi-Track Timeline
@@ -188,6 +207,7 @@ fun EditorScreen(
                 project = project,
                 currentPlayheadMs = uiState.currentPlayheadMs,
                 selectedClipId = uiState.selectedClipId,
+                timelineZoom = uiState.timelineZoom,
                 onSelectClip = { viewModel.selectClip(it) },
                 onSeekTo = { viewModel.seekTo(it) }
             )
@@ -237,6 +257,29 @@ fun EditorScreen(
                         onClose = { viewModel.closeSheet() }
                     )
                 }
+                SheetType.TRANSITIONS -> {
+                    val sel = project.clips.firstOrNull { it.id == uiState.selectedClipId } ?: project.clips.firstOrNull()
+                    TransitionsSheet(
+                        initialTransition = sel?.transitionToNext ?: TransitionType.NONE,
+                        initialDurationMs = sel?.transitionDurationMs ?: 500L,
+                        onApply = { trans, dur, toAll -> viewModel.applyTransition(trans, dur, toAll) },
+                        onClose = { viewModel.closeSheet() }
+                    )
+                }
+                SheetType.STICKERS -> OverlayStickersSheet(
+                    currentPlayheadMs = uiState.currentPlayheadMs,
+                    onAddOverlay = { viewModel.addOverlay(it) },
+                    onClose = { viewModel.closeSheet() }
+                )
+                SheetType.ADD_MEDIA -> AddMediaSheet(
+                    onAddClip = { viewModel.addMediaClip(it) },
+                    onAddClips = { viewModel.addMediaClips(it) },
+                    onClose = { viewModel.closeSheet() }
+                )
+                SheetType.SRT_EXPORT -> SrtExportSheet(
+                    subtitles = project.subtitles,
+                    onClose = { viewModel.closeSheet() }
+                )
                 else -> {}
             }
         }
@@ -250,16 +293,24 @@ fun EditorScreen(
         )
     }
 
-    // Speed Dialog
+    // Speed & Curve Sheet
     if (showSpeedDialog) {
-        SpeedSelectionDialog(
-            currentSpeed = project.clips.firstOrNull { it.id == uiState.selectedClipId }?.speed ?: 1.0f,
-            onSpeedSelected = {
-                viewModel.updateSelectedClipSpeed(it)
-                showSpeedDialog = false
-            },
-            onDismiss = { showSpeedDialog = false }
-        )
+        val selClip = project.clips.firstOrNull { it.id == uiState.selectedClipId } ?: project.clips.firstOrNull()
+        ModalBottomSheet(
+            onDismissRequest = { showSpeedDialog = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = DarkSurface
+        ) {
+            SpeedCurveSheet(
+                initialSpeed = selClip?.speed ?: 1.0f,
+                initialCurve = selClip?.speedCurve ?: SpeedCurvePreset.STANDARD,
+                onApplySpeed = { speed, curve ->
+                    viewModel.updateClipSpeedAndCurve(speed, curve)
+                    showSpeedDialog = false
+                },
+                onClose = { showSpeedDialog = false }
+            )
+        }
     }
 }
 
@@ -271,6 +322,7 @@ private fun EditorTopBar(
     canRedo: Boolean,
     onBack: () -> Unit,
     onAspectClick: () -> Unit,
+    onImportClick: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onExport: () -> Unit
@@ -300,6 +352,23 @@ private fun EditorTopBar(
                     Icon(Icons.Default.AspectRatio, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(aspectRatio.label, color = Color(0xFFE2E8F0), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Quick Import Button
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFF1E293B), RoundedCornerShape(12.dp))
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .clickable(onClick = onImportClick)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Add, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Import", color = AccentCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -349,48 +418,72 @@ private fun EditorTopBar(
 private fun PlaybackBar(
     currentMs: Long,
     totalMs: Long,
+    timelineZoom: Float,
     isPlaying: Boolean,
     onTogglePlay: () -> Unit,
-    onRewind: () -> Unit,
-    onForward: () -> Unit
+    onSetZoom: (Float) -> Unit
 ) {
+    val curFrame = (currentMs * 30 / 1000).toInt()
+    val totFrames = (totalMs * 30 / 1000).toInt()
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF13151E))
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Timecode display
-        val curSec = currentMs / 1000f
-        val totSec = totalMs / 1000f
-        Text(
-            text = "${formatTime(currentMs)} / ${formatTime(totalMs)}",
-            color = Color(0xFF94A3B8),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        // Center Play / Pause button
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onTogglePlay, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
+        // Timecode & Frame Counter
+        Column {
+            Text(
+                text = "${formatTime(currentMs)} / ${formatTime(totalMs)}",
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Frame $curFrame / $totFrames @30fps",
+                color = AccentCyan,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
 
-        // Live badge
-        Box(
+        // Center Play / Pause button
+        IconButton(onClick = onTogglePlay, modifier = Modifier.size(34.dp)) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                tint = Color.White,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+
+        // Timeline Zoom Controls
+        Row(
             modifier = Modifier
-                .background(Color(0xFF1E2333), RoundedCornerShape(6.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+                .background(Color(0xFF1E2333), RoundedCornerShape(12.dp))
+                .padding(2.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Edit88 Canvas", color = Color(0xFF67E8F9), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            listOf(1.0f, 1.5f, 2.0f).forEach { z ->
+                val isSel = (timelineZoom == z)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isSel) AccentPurple else Color.Transparent)
+                        .clickable { onSetZoom(z) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "${z}x",
+                        color = if (isSel) Color.White else Color(0xFF94A3B8),
+                        fontSize = 9.sp,
+                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
         }
     }
 }
@@ -398,11 +491,15 @@ private fun PlaybackBar(
 @Composable
 private fun ClipActionRibbon(
     selectedClipId: String?,
+    onAddClip: () -> Unit,
     onSplit: () -> Unit,
     onSpeed: () -> Unit,
+    onTransition: () -> Unit,
+    onStickers: () -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
-    onFilter: () -> Unit
+    onFilter: () -> Unit,
+    onExportSrt: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -413,10 +510,14 @@ private fun ClipActionRibbon(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        RibbonItem(icon = Icons.Default.Add, label = "+ Add Clip", onClick = onAddClip, tint = AccentCyan)
         RibbonItem(icon = Icons.Default.Movie, label = "Split", onClick = onSplit)
         RibbonItem(icon = Icons.Default.Speed, label = "Speed", onClick = onSpeed)
+        RibbonItem(icon = Icons.Default.FlashOn, label = "Transition", onClick = onTransition, tint = AccentPurple)
+        RibbonItem(icon = Icons.Default.Layers, label = "Stickers", onClick = onStickers, tint = AccentPink)
         RibbonItem(icon = Icons.Default.ContentCopy, label = "Duplicate", onClick = onDuplicate)
         RibbonItem(icon = Icons.Default.ColorLens, label = "Grading", onClick = onFilter)
+        RibbonItem(icon = Icons.Default.Subtitles, label = ".SRT Subtitles", onClick = onExportSrt, tint = Color(0xFFFBBF24))
         RibbonItem(icon = Icons.Default.Delete, label = "Delete", onClick = onDelete, tint = Color(0xFFF87171))
     }
 }
@@ -449,16 +550,18 @@ private fun EditorBottomToolbar(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF11131B))
-            .padding(vertical = 8.dp, horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 8.dp, horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ToolbarActionItem(icon = Icons.Default.Movie, label = "Clips", onClick = { onActionClick(SheetType.FILTERS) })
+        ToolbarActionItem(icon = Icons.Default.Add, label = "Media", onClick = { onActionClick(SheetType.ADD_MEDIA) })
         ToolbarActionItem(icon = Icons.Default.Audiotrack, label = "Audio", onClick = { onActionClick(SheetType.AUDIO) })
         ToolbarActionItem(
             icon = Icons.Default.TextFields,
             label = "Urdu Text",
             isHighlighted = true,
+            highlightColor = AccentPink,
             onClick = { onActionClick(SheetType.SUBTITLES) }
         )
         ToolbarActionItem(
@@ -468,7 +571,9 @@ private fun EditorBottomToolbar(
             highlightColor = AccentCyan,
             onClick = { onActionClick(SheetType.AI_STUDIO) }
         )
-        ToolbarActionItem(icon = Icons.Default.ColorLens, label = "Filters", onClick = { onActionClick(SheetType.FILTERS) })
+        ToolbarActionItem(icon = Icons.Default.FlashOn, label = "Transition", onClick = { onActionClick(SheetType.TRANSITIONS) })
+        ToolbarActionItem(icon = Icons.Default.Layers, label = "Stickers", onClick = { onActionClick(SheetType.STICKERS) })
+        ToolbarActionItem(icon = Icons.Default.ColorLens, label = "Filters & LUTs", onClick = { onActionClick(SheetType.FILTERS) })
         ToolbarActionItem(icon = Icons.Default.Settings, label = "Settings", onClick = { onActionClick(SheetType.SETTINGS) })
     }
 }
