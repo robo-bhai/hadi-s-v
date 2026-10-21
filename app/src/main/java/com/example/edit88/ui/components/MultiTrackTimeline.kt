@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -21,7 +22,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.TextFields
@@ -30,6 +33,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,8 +69,20 @@ fun MultiTrackTimeline(
     project: Project,
     currentPlayheadMs: Long,
     selectedClipId: String?,
+    selectedSubtitleId: String? = null,
+    selectedOverlayId: String? = null,
     timelineZoom: Float = 1.0f,
     onSelectClip: (String) -> Unit,
+    onSelectSubtitle: ((String) -> Unit)? = null,
+    onSelectOverlay: ((String) -> Unit)? = null,
+    onUpdateSubtitleDuration: ((String, Long, Long) -> Unit)? = null,
+    onUpdateClipTrim: ((String, Long, Long) -> Unit)? = null,
+    onUpdateOverlayDuration: ((String, Long, Long) -> Unit)? = null,
+    onAddVideoClipClick: (() -> Unit)? = null,
+    onAddOverlayClick: (() -> Unit)? = null,
+    onAddTextClick: (() -> Unit)? = null,
+    onAddAudioClick: (() -> Unit)? = null,
+    onGenerateSubtitlesClick: (() -> Unit)? = null,
     onSeekTo: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -142,7 +159,7 @@ fun MultiTrackTimeline(
                 .height(180.dp)
         ) {
             Row(modifier = Modifier.fillMaxWidth()) {
-                // Fixed Track Icon Rail
+                // Fixed Track Icon Rail with multi-item add shortcuts
                 Column(
                     modifier = Modifier
                         .width(44.dp)
@@ -152,10 +169,10 @@ fun MultiTrackTimeline(
                     verticalArrangement = Arrangement.SpaceEvenly,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    TrackIconItem(icon = Icons.Default.Movie, color = TrackVideoColor, label = "Video")
-                    TrackIconItem(icon = Icons.Default.Layers, color = TrackOverlayColor, label = "PiP")
-                    TrackIconItem(icon = Icons.Default.TextFields, color = TrackSubtitleColor, label = "Urdu")
-                    TrackIconItem(icon = Icons.Default.Audiotrack, color = TrackAudioColor, label = "Audio")
+                    TrackIconItem(icon = Icons.Default.Movie, color = TrackVideoColor, label = "Video", onAddClick = onAddVideoClipClick)
+                    TrackIconItem(icon = Icons.Default.Layers, color = TrackOverlayColor, label = "PiP", onAddClick = onAddOverlayClick)
+                    TrackIconItem(icon = Icons.Default.TextFields, color = TrackSubtitleColor, label = "Text", onAddClick = onAddTextClick)
+                    TrackIconItem(icon = Icons.Default.Audiotrack, color = TrackAudioColor, label = "Audio", onAddClick = onAddAudioClick)
                 }
 
                 // Scrollable Tracks Area
@@ -173,13 +190,10 @@ fun MultiTrackTimeline(
                                 onSeekTo(targetMs)
                             }
                         }
-                        .clickable {
-                            // Quick click seek
-                        }
                 ) {
                     Column(
                         modifier = Modifier
-                            .width(timelineWidthDp + 200.dp)
+                            .width(timelineWidthDp + 240.dp)
                             .fillMaxHeight()
                             .padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.SpaceEvenly
@@ -189,13 +203,19 @@ fun MultiTrackTimeline(
                             clips = project.clips,
                             msPerDp = msPerDp,
                             selectedClipId = selectedClipId,
-                            onSelectClip = onSelectClip
+                            onSelectClip = onSelectClip,
+                            onUpdateClipTrim = onUpdateClipTrim,
+                            onAddClipClick = onAddVideoClipClick
                         )
 
                         // 2. Overlay Track
                         OverlayTrackRow(
                             overlays = project.overlays,
                             msPerDp = msPerDp,
+                            selectedOverlayId = selectedOverlayId,
+                            onSelectOverlay = onSelectOverlay,
+                            onUpdateOverlayDuration = onUpdateOverlayDuration,
+                            onAddOverlayClick = onAddOverlayClick,
                             onSeekTo = onSeekTo
                         )
 
@@ -203,6 +223,11 @@ fun MultiTrackTimeline(
                         SubtitleTrackRow(
                             subtitles = project.subtitles,
                             msPerDp = msPerDp,
+                            selectedSubtitleId = selectedSubtitleId,
+                            onSelectSubtitle = onSelectSubtitle,
+                            onUpdateSubtitleDuration = onUpdateSubtitleDuration,
+                            onAddTextClick = onAddTextClick,
+                            onGenerateSubtitlesClick = onGenerateSubtitlesClick,
                             onSeekTo = onSeekTo
                         )
 
@@ -210,6 +235,7 @@ fun MultiTrackTimeline(
                         AudioTrackRow(
                             audioTracks = project.audioTracks,
                             msPerDp = msPerDp,
+                            onAddAudioClick = onAddAudioClick,
                             onSeekTo = onSeekTo
                         )
                     }
@@ -239,18 +265,31 @@ fun MultiTrackTimeline(
 }
 
 @Composable
-private fun TrackIconItem(icon: ImageVector, color: Color, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = color,
-            modifier = Modifier.size(18.dp)
-        )
+private fun TrackIconItem(
+    icon: ImageVector,
+    color: Color,
+    label: String,
+    onAddClick: (() -> Unit)? = null
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clickable { onAddClick?.invoke() }
+            .padding(horizontal = 2.dp, vertical = 2.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = color,
+                modifier = Modifier.size(17.dp)
+            )
+        }
         Text(
             text = label,
-            color = Color(0xFF64748B),
-            fontSize = 9.sp
+            color = Color(0xFF94A3B8),
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Medium
         )
     }
 }
@@ -260,7 +299,9 @@ private fun VideoTrackRow(
     clips: List<MediaClip>,
     msPerDp: Float,
     selectedClipId: String?,
-    onSelectClip: (String) -> Unit
+    onSelectClip: (String) -> Unit,
+    onUpdateClipTrim: ((String, Long, Long) -> Unit)? = null,
+    onAddClipClick: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -277,15 +318,16 @@ private fun VideoTrackRow(
                     .width(120.dp)
                     .height(34.dp)
                     .background(Color(0xFF2B2F40), RoundedCornerShape(4.dp))
+                    .clickable { onAddClipClick?.invoke() }
                     .padding(horizontal = 8.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
                 Text("+ Add Media", color = Color(0xFF94A3B8), fontSize = 11.sp)
             }
         } else {
-            clips.forEach { clip ->
-                val clipWidthDp = (clip.effectiveDurationMs / msPerDp).dp.coerceAtLeast(36.dp)
-                val isSelected = clip.id == selectedClipId
+            clips.forEach { mediaClip ->
+                val clipWidthDp = (mediaClip.effectiveDurationMs / msPerDp).dp.coerceAtLeast(36.dp)
+                val isSelected = mediaClip.id == selectedClipId
 
                 Box(
                     modifier = Modifier
@@ -295,8 +337,8 @@ private fun VideoTrackRow(
                         .background(
                             Brush.horizontalGradient(
                                 listOf(
-                                    Color(clip.primaryColorHex).copy(alpha = 0.85f),
-                                    Color(clip.secondaryColorHex).copy(alpha = 0.85f)
+                                    Color(mediaClip.primaryColorHex).copy(alpha = 0.85f),
+                                    Color(mediaClip.secondaryColorHex).copy(alpha = 0.85f)
                                 )
                             )
                         )
@@ -305,45 +347,100 @@ private fun VideoTrackRow(
                             color = if (isSelected) Color(0xFFFACC15) else Color.White.copy(alpha = 0.2f),
                             shape = RoundedCornerShape(4.dp)
                         )
-                        .clickable { onSelectClip(clip.id) }
-                        .padding(horizontal = 6.dp),
-                    contentAlignment = Alignment.CenterStart
+                        .clickable { onSelectClip(mediaClip.id) }
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxSize(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
-                            if (clip.isLocalVideo) {
-                                Box(
-                                    modifier = Modifier
-                                        .background(Color(0xFF06B6D4), RoundedCornerShape(2.dp))
-                                        .padding(horizontal = 3.dp, vertical = 1.dp)
-                                ) {
-                                    Text("LOCAL", color = Color.Black, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
-                                }
-                                Spacer(modifier = Modifier.width(4.dp))
+                        // Left Trim Handle on selected clip
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .width(8.dp)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFFFACC15), RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                                    .pointerInput(mediaClip.id) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                            val newStart = (mediaClip.startTrimMs + deltaMs).coerceIn(0L, mediaClip.endTrimMs - 300L)
+                                            onUpdateClipTrim?.invoke(mediaClip.id, newStart, mediaClip.endTrimMs)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.width(1.5.dp).height(12.dp).background(Color.Black))
                             }
-                            Text(
-                                text = clip.title,
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
                         }
-                        if (clip.speed != 1.0f) {
-                            Text(
-                                text = "${clip.speed}x",
-                                color = Color(0xFFFDE047),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (mediaClip.isLocalVideo) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color(0xFF06B6D4), RoundedCornerShape(2.dp))
+                                            .padding(horizontal = 3.dp, vertical = 1.dp)
+                                    ) {
+                                        Text("LOCAL", color = Color.Black, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
+                                Text(
+                                    text = mediaClip.title,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                            if (isSelected) {
+                                val durSec = mediaClip.effectiveDurationMs / 1000f
+                                Text(
+                                    text = String.format("%.1fs", durSec),
+                                    color = Color(0xFFFEF08A),
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            } else if (mediaClip.speed != 1.0f) {
+                                Text(
+                                    text = "${mediaClip.speed}x",
+                                    color = Color(0xFFFDE047),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Right Trim Handle on selected clip
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .width(8.dp)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFFFACC15), RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                                    .pointerInput(mediaClip.id) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                            val newEnd = (mediaClip.endTrimMs + deltaMs).coerceAtLeast(mediaClip.startTrimMs + 300L)
+                                            onUpdateClipTrim?.invoke(mediaClip.id, mediaClip.startTrimMs, newEnd)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.width(1.5.dp).height(12.dp).background(Color.Black))
+                            }
                         }
                     }
                 }
-                if (clip.transitionToNext != TransitionType.NONE) {
+                if (mediaClip.transitionToNext != TransitionType.NONE) {
                     Box(
                         modifier = Modifier
                             .size(16.dp)
@@ -351,10 +448,27 @@ private fun VideoTrackRow(
                             .border(1.dp, Color(0xFF38BDF8), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(clip.transitionToNext.iconEmoji, fontSize = 9.sp)
+                        Text(mediaClip.transitionToNext.iconEmoji, fontSize = 9.sp)
                     }
                 }
                 Spacer(modifier = Modifier.width(2.dp))
+            }
+
+            // Multi-Item Insertion "+" Button for Video Track
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .background(Color(0xFF262A38), RoundedCornerShape(4.dp))
+                    .border(1.dp, Color(0xFF3B82F6), RoundedCornerShape(4.dp))
+                    .clickable { onAddClipClick?.invoke() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Video Clip",
+                    tint = Color(0xFF60A5FA),
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -364,6 +478,10 @@ private fun VideoTrackRow(
 private fun OverlayTrackRow(
     overlays: List<OverlayClip>,
     msPerDp: Float,
+    selectedOverlayId: String? = null,
+    onSelectOverlay: ((String) -> Unit)? = null,
+    onUpdateOverlayDuration: ((String, Long, Long) -> Unit)? = null,
+    onAddOverlayClick: (() -> Unit)? = null,
     onSeekTo: (Long) -> Unit
 ) {
     Box(
@@ -373,28 +491,130 @@ private fun OverlayTrackRow(
             .background(Color(0xFF171A24), RoundedCornerShape(4.dp))
             .padding(1.dp)
     ) {
-        overlays.forEach { overlay ->
-            val startDp = (overlay.startTimeMs / msPerDp).dp
-            val widthDp = (overlay.durationMs / msPerDp).dp.coerceAtLeast(30.dp)
-
+        if (overlays.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .offset(x = startDp)
-                    .width(widthDp)
-                    .height(30.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF7E22CE))
-                    .border(0.5.dp, Color(0xFFA855F7), RoundedCornerShape(4.dp))
-                    .clickable { onSeekTo(overlay.startTimeMs) }
-                    .padding(horizontal = 6.dp),
+                    .padding(start = 8.dp)
+                    .background(Color(0xFF7E22CE).copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                    .border(1.dp, Color(0xFFA855F7), RoundedCornerShape(4.dp))
+                    .clickable { onAddOverlayClick?.invoke() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
-                Text(
-                    text = "${overlay.iconEmoji} ${overlay.label}",
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
+                Text("+ Add PiP / Overlay", color = Color(0xFFE9D5FF), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            overlays.forEach { overlay ->
+                val isSelected = overlay.id == selectedOverlayId
+                val startDp = (overlay.startTimeMs / msPerDp).dp
+                val widthDp = (overlay.durationMs / msPerDp).dp.coerceAtLeast(36.dp)
+
+                Box(
+                    modifier = Modifier
+                        .offset(x = startDp)
+                        .width(widthDp)
+                        .height(30.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isSelected) Color(0xFF9333EA) else Color(0xFF7E22CE))
+                        .border(
+                            width = if (isSelected) 1.5.dp else 0.5.dp,
+                            color = if (isSelected) Color(0xFFFDE047) else Color(0xFFA855F7),
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                        .clickable {
+                            onSelectOverlay?.invoke(overlay.id)
+                            onSeekTo(overlay.startTimeMs)
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .width(8.dp)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFFFACC15), RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                                    .pointerInput(overlay.id) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                            val newStart = (overlay.startTimeMs + deltaMs).coerceAtLeast(0L)
+                                            onUpdateOverlayDuration?.invoke(overlay.id, newStart, overlay.durationMs)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.width(1.5.dp).height(10.dp).background(Color.Black))
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${overlay.iconEmoji} ${overlay.label}",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                            if (overlay.chromaKeyEnabled) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF10B981), RoundedCornerShape(2.dp))
+                                        .padding(horizontal = 3.dp, vertical = 0.5.dp)
+                                ) {
+                                    Text("CHROMA", color = Color.Black, fontSize = 6.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .width(8.dp)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFFFACC15), RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                                    .pointerInput(overlay.id) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                            val newDur = (overlay.durationMs + deltaMs).coerceAtLeast(500L)
+                                            onUpdateOverlayDuration?.invoke(overlay.id, overlay.startTimeMs, newDur)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.width(1.5.dp).height(10.dp).background(Color.Black))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // "+" Button to add more overlays
+            val maxOverlayEnd = overlays.maxOfOrNull { it.startTimeMs + it.durationMs } ?: 0L
+            val addBtnOffset = (maxOverlayEnd / msPerDp).dp + 6.dp
+            Box(
+                modifier = Modifier
+                    .offset(x = addBtnOffset)
+                    .size(28.dp)
+                    .background(Color(0xFF261D3B), RoundedCornerShape(4.dp))
+                    .border(1.dp, Color(0xFFA855F7), RoundedCornerShape(4.dp))
+                    .clickable { onAddOverlayClick?.invoke() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Overlay",
+                    tint = Color(0xFFC084FC),
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -405,36 +625,163 @@ private fun OverlayTrackRow(
 private fun SubtitleTrackRow(
     subtitles: List<SubtitleClip>,
     msPerDp: Float,
+    selectedSubtitleId: String?,
+    onSelectSubtitle: ((String) -> Unit)?,
+    onUpdateSubtitleDuration: ((String, Long, Long) -> Unit)?,
+    onAddTextClick: (() -> Unit)?,
+    onGenerateSubtitlesClick: (() -> Unit)?,
     onSeekTo: (Long) -> Unit
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(32.dp)
+            .height(34.dp)
             .background(Color(0xFF171A24), RoundedCornerShape(4.dp))
-            .padding(1.dp)
+            .padding(1.dp),
+        contentAlignment = Alignment.CenterStart
     ) {
-        subtitles.forEach { sub ->
-            val startDp = (sub.startMs / msPerDp).dp
-            val widthDp = ((sub.endMs - sub.startMs) / msPerDp).dp.coerceAtLeast(24.dp)
+        if (subtitles.isEmpty()) {
+            Row(
+                modifier = Modifier.padding(start = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFFB45309).copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                        .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(4.dp))
+                        .clickable { onAddTextClick?.invoke() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text("+ Add Text", color = Color(0xFFFDE68A), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF0284C7).copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                        .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(4.dp))
+                        .clickable { onGenerateSubtitlesClick?.invoke() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text("✨ Generate Subtitles", color = Color(0xFFBAE6FD), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        } else {
+            subtitles.forEach { sub ->
+                val isSelected = sub.id == selectedSubtitleId
+                val startDp = (sub.startMs / msPerDp).dp
+                val widthDp = ((sub.endMs - sub.startMs) / msPerDp).dp.coerceAtLeast(36.dp)
 
+                Box(
+                    modifier = Modifier
+                        .offset(x = startDp)
+                        .width(widthDp)
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isSelected) Color(0xFFD97706) else Color(0xFF92400E))
+                        .border(
+                            width = if (isSelected) 1.5.dp else 0.5.dp,
+                            color = if (isSelected) Color(0xFFFDE047) else Color(0xFFF59E0B),
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                        .clickable {
+                            onSelectSubtitle?.invoke(sub.id)
+                            onSeekTo(sub.startMs)
+                        }
+                        .padding(horizontal = 1.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left trim handle (adjust startMs)
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .width(10.dp)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFFFACC15), RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                                    .pointerInput(sub.id) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                            val newStart = (sub.startMs + deltaMs).coerceIn(0L, sub.endMs - 300L)
+                                            onUpdateSubtitleDuration?.invoke(sub.id, newStart, sub.endMs)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.width(2.dp).height(12.dp).background(Color.Black))
+                            }
+                        }
+
+                        // Middle text & duration
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = sub.text,
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                            if (isSelected) {
+                                val durSec = (sub.endMs - sub.startMs) / 1000f
+                                Text(
+                                    text = String.format("%.1fs", durSec),
+                                    color = Color(0xFFFEF08A),
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+
+                        // Right trim handle (adjust endMs)
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .width(10.dp)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFFFACC15), RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                                    .pointerInput(sub.id) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                            val newEnd = (sub.endMs + deltaMs).coerceAtLeast(sub.startMs + 300L)
+                                            onUpdateSubtitleDuration?.invoke(sub.id, sub.startMs, newEnd)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.width(2.dp).height(12.dp).background(Color.Black))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // "+" Button to add more text layers
+            val maxSubEnd = subtitles.maxOfOrNull { it.endMs } ?: 0L
+            val addTextOffset = (maxSubEnd / msPerDp).dp + 6.dp
             Box(
                 modifier = Modifier
-                    .offset(x = startDp)
-                    .width(widthDp)
-                    .height(30.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFFB45309))
-                    .border(0.5.dp, Color(0xFFF59E0B), RoundedCornerShape(4.dp))
-                    .clickable { onSeekTo(sub.startMs) }
-                    .padding(horizontal = 4.dp),
+                    .offset(x = addTextOffset)
+                    .size(28.dp)
+                    .background(Color(0xFF2C2216), RoundedCornerShape(4.dp))
+                    .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(4.dp))
+                    .clickable { onAddTextClick?.invoke() },
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = sub.text,
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    maxLines = 1
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Text Layer",
+                    tint = Color(0xFFFBBF24),
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -445,6 +792,7 @@ private fun SubtitleTrackRow(
 private fun AudioTrackRow(
     audioTracks: List<AudioTrack>,
     msPerDp: Float,
+    onAddAudioClick: (() -> Unit)? = null,
     onSeekTo: (Long) -> Unit
 ) {
     Box(
@@ -454,7 +802,20 @@ private fun AudioTrackRow(
             .background(Color(0xFF171A24), RoundedCornerShape(4.dp))
             .padding(1.dp)
     ) {
-        audioTracks.forEach { audio ->
+        if (audioTracks.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .background(Color(0xFF065F46).copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                    .border(1.dp, Color(0xFF10B981), RoundedCornerShape(4.dp))
+                    .clickable { onAddAudioClick?.invoke() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text("+ Add Music / Audio", color = Color(0xFFA7F3D0), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            audioTracks.forEach { audio ->
             val startDp = (audio.startTimeMs / msPerDp).dp
             val widthDp = (audio.durationMs / msPerDp).dp.coerceAtLeast(30.dp)
 
@@ -475,19 +836,61 @@ private fun AudioTrackRow(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "♪ ${audio.name}",
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                        if (audio.isExtracted) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF0284C7), RoundedCornerShape(2.dp))
+                                    .padding(horizontal = 3.dp, vertical = 1.dp)
+                            ) {
+                                Text("EXTRACTED", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                        } else if (!audio.uriString.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF059669), RoundedCornerShape(2.dp))
+                                    .padding(horizontal = 3.dp, vertical = 1.dp)
+                            ) {
+                                Text("DEVICE", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = "♪ ${audio.name}",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1
+                        )
+                    }
                     Text(
                         text = "${(audio.volume * 100).toInt()}%",
                         color = Color(0xFF6EE7B7),
                         fontSize = 9.sp
                     )
                 }
+            }
+        }
+
+            // "+" Button to add more audio tracks
+            val maxAudioEnd = audioTracks.maxOfOrNull { it.startTimeMs + it.durationMs } ?: 0L
+            val addAudioOffset = (maxAudioEnd / msPerDp).dp + 6.dp
+            Box(
+                modifier = Modifier
+                    .offset(x = addAudioOffset)
+                    .size(28.dp)
+                    .background(Color(0xFF142E25), RoundedCornerShape(4.dp))
+                    .border(1.dp, Color(0xFF10B981), RoundedCornerShape(4.dp))
+                    .clickable { onAddAudioClick?.invoke() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Audio Track",
+                    tint = Color(0xFF34D399),
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }

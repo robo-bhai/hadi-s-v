@@ -35,14 +35,19 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.ZoomIn
+import com.example.ui.theme.AccentAmber
 import com.example.edit88.model.SpeedCurvePreset
 import com.example.edit88.model.TransitionType
 import com.example.edit88.ui.sheets.AddMediaSheet
+import com.example.edit88.ui.sheets.ClipEditSheet
+import com.example.edit88.ui.sheets.OverlayPipSheet
 import com.example.edit88.ui.sheets.OverlayStickersSheet
 import com.example.edit88.ui.sheets.SpeedCurveSheet
 import com.example.edit88.ui.sheets.SrtExportSheet
@@ -160,7 +165,7 @@ fun EditorScreen(
                 }
             }
 
-            // 1. Live Video Canvas Preview
+            // 1. Live Video Canvas Preview with Interactive Drag, Rotate, Scale
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -171,10 +176,21 @@ fun EditorScreen(
                     project = project,
                     currentPlayheadMs = uiState.currentPlayheadMs,
                     isPlaying = uiState.isPlaying,
+                    selectedSubtitleId = uiState.selectedSubtitleId,
+                    selectedOverlayId = uiState.selectedOverlayId,
                     onTogglePlay = { viewModel.togglePlayPause() },
                     onUpdateOverlay = { viewModel.updateOverlay(it) },
                     onDeleteOverlay = { viewModel.deleteOverlay(it) },
-                    onUpdateSubtitlePosition = { id, x, y, scale -> viewModel.updateSubtitlePosition(id, x, y, scale) }
+                    onSelectOverlay = { viewModel.selectOverlay(it) },
+                    onSelectSubtitle = { viewModel.selectSubtitle(it) },
+                    onUpdateSubtitlePosition = { id, x, y, scale, rot ->
+                        viewModel.updateSubtitlePosition(id, x, y, scale, rot)
+                    },
+                    onDeleteSubtitle = { viewModel.deleteSubtitle(it) },
+                    onEditSubtitle = {
+                        viewModel.selectSubtitle(it.id)
+                        viewModel.openSheet(SheetType.SUBTITLES)
+                    }
                 )
             }
 
@@ -192,6 +208,11 @@ fun EditorScreen(
             ClipActionRibbon(
                 selectedClipId = uiState.selectedClipId,
                 onAddClip = { viewModel.openSheet(SheetType.ADD_MEDIA) },
+                onEditClip = { viewModel.openSheet(SheetType.CLIP_EDIT) },
+                onAddText = { viewModel.openSheet(SheetType.SUBTITLES) },
+                onOverlay = { viewModel.openSheet(SheetType.OVERLAY_PIP) },
+                onExtractAudio = { viewModel.extractAudioFromClip() },
+                onGenerateSubtitles = { viewModel.generateSubtitlesForProject() },
                 onSplit = { viewModel.splitClipAtPlayhead() },
                 onSpeed = { showSpeedDialog = true },
                 onTransition = { viewModel.openSheet(SheetType.TRANSITIONS) },
@@ -202,13 +223,25 @@ fun EditorScreen(
                 onExportSrt = { viewModel.openSheet(SheetType.SRT_EXPORT) }
             )
 
-            // 4. Multi-Track Timeline
+            // 4. Multi-Track Timeline with Subtitle duration trimming and Track Badges
             MultiTrackTimeline(
                 project = project,
                 currentPlayheadMs = uiState.currentPlayheadMs,
                 selectedClipId = uiState.selectedClipId,
+                selectedSubtitleId = uiState.selectedSubtitleId,
+                selectedOverlayId = uiState.selectedOverlayId,
                 timelineZoom = uiState.timelineZoom,
                 onSelectClip = { viewModel.selectClip(it) },
+                onSelectSubtitle = { viewModel.selectSubtitle(it) },
+                onSelectOverlay = { viewModel.selectOverlay(it) },
+                onUpdateSubtitleDuration = { id, start, end -> viewModel.updateSubtitleDuration(id, start, end) },
+                onUpdateClipTrim = { id, start, end -> viewModel.updateClipTrim(id, start, end) },
+                onUpdateOverlayDuration = { id, start, dur -> viewModel.updateOverlayDuration(id, start, dur) },
+                onAddVideoClipClick = { viewModel.openSheet(SheetType.ADD_MEDIA) },
+                onAddOverlayClick = { viewModel.openSheet(SheetType.OVERLAY_PIP) },
+                onAddTextClick = { viewModel.openSheet(SheetType.SUBTITLES) },
+                onAddAudioClick = { viewModel.openSheet(SheetType.AUDIO) },
+                onGenerateSubtitlesClick = { viewModel.generateSubtitlesForProject() },
                 onSeekTo = { viewModel.seekTo(it) }
             )
         }
@@ -227,9 +260,14 @@ fun EditorScreen(
                     geminiService = viewModel.geminiService,
                     onClose = { viewModel.closeSheet() }
                 )
-                SheetType.SUBTITLES -> UrduSubtitleSheet(
+                SheetType.SUBTITLES, SheetType.TEXT_EDIT -> UrduSubtitleSheet(
+                    project = project,
                     currentPlayheadMs = uiState.currentPlayheadMs,
+                    selectedSubtitleId = uiState.selectedSubtitleId,
                     onAddSubtitle = { viewModel.addSubtitle(it) },
+                    onUpdateSubtitle = { viewModel.updateSubtitle(it) },
+                    onDeleteSubtitle = { viewModel.deleteSubtitle(it) },
+                    onGenerateSubtitles = { viewModel.generateSubtitlesForProject() },
                     onClose = { viewModel.closeSheet() }
                 )
                 SheetType.AI_STUDIO -> AiStudioSheet(
@@ -244,8 +282,48 @@ fun EditorScreen(
                     onClose = { viewModel.closeSheet() }
                 )
                 SheetType.AUDIO -> AudioEffectsSheet(
+                    project = project,
                     currentPlayheadMs = uiState.currentPlayheadMs,
                     onAddAudioTrack = { viewModel.addAudioTrack(it) },
+                    onExtractAudio = { viewModel.extractAudioFromClip() },
+                    onAddLocalAudio = { name, uri, dur -> viewModel.addLocalAudioTrack(name, uri, dur) },
+                    onAddRecordedAudio = { name, uri, dur -> viewModel.addRecordedAudioTrack(name, uri, dur) },
+                    onDeleteAudioTrack = { viewModel.deleteAudioTrack(it) },
+                    onUpdateAudioTrack = { viewModel.updateAudioTrack(it) },
+                    onClose = { viewModel.closeSheet() }
+                )
+                SheetType.CLIP_EDIT -> {
+                    val sel = project.clips.firstOrNull { it.id == uiState.selectedClipId } ?: project.clips.firstOrNull()
+                    if (sel != null) {
+                        ClipEditSheet(
+                            clip = sel,
+                            currentPlayheadMs = uiState.currentPlayheadMs,
+                            onUpdateTrim = { id, start, end -> viewModel.updateClipTrim(id, start, end) },
+                            onUpdateSpeed = { id, spd -> viewModel.updateClipSpeedAndCurve(spd, sel.speedCurve) },
+                            onSplitAtPlayhead = { viewModel.splitClipAtPlayhead() },
+                            onExtractAudio = { viewModel.extractAudioFromClip(sel.id) },
+                            onDuplicateClip = { viewModel.duplicateSelectedClip() },
+                            onDeleteClip = {
+                                viewModel.deleteSelectedClip()
+                                viewModel.closeSheet()
+                            },
+                            onOpenFilters = { viewModel.openSheet(SheetType.FILTERS) },
+                            onOpenSpeedCurves = {
+                                viewModel.closeSheet()
+                                showSpeedDialog = true
+                            },
+                            onClose = { viewModel.closeSheet() }
+                        )
+                    }
+                }
+                SheetType.OVERLAY_PIP -> OverlayPipSheet(
+                    project = project,
+                    currentPlayheadMs = uiState.currentPlayheadMs,
+                    selectedOverlayId = uiState.selectedOverlayId,
+                    onAddOverlay = { viewModel.addOverlayClip(it) },
+                    onUpdateOverlay = { viewModel.updateOverlay(it) },
+                    onDeleteOverlay = { viewModel.deleteOverlay(it) },
+                    onSelectOverlay = { viewModel.selectOverlay(it) },
                     onClose = { viewModel.closeSheet() }
                 )
                 SheetType.FILTERS -> {
@@ -492,6 +570,11 @@ private fun PlaybackBar(
 private fun ClipActionRibbon(
     selectedClipId: String?,
     onAddClip: () -> Unit,
+    onEditClip: () -> Unit,
+    onAddText: () -> Unit,
+    onOverlay: () -> Unit,
+    onExtractAudio: () -> Unit,
+    onGenerateSubtitles: () -> Unit,
     onSplit: () -> Unit,
     onSpeed: () -> Unit,
     onTransition: () -> Unit,
@@ -505,12 +588,17 @@ private fun ClipActionRibbon(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF181B26))
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
             .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         RibbonItem(icon = Icons.Default.Add, label = "+ Add Clip", onClick = onAddClip, tint = AccentCyan)
+        RibbonItem(icon = Icons.Default.Movie, label = "Edit / Trim", onClick = onEditClip, tint = Color(0xFF38BDF8))
+        RibbonItem(icon = Icons.Default.TextFields, label = "+ Add Text", onClick = onAddText, tint = AccentAmber)
+        RibbonItem(icon = Icons.Default.Layers, label = "Overlay (PiP)", onClick = onOverlay, tint = AccentPurple)
+        RibbonItem(icon = Icons.AutoMirrored.Filled.VolumeUp, label = "Extract Audio", onClick = onExtractAudio, tint = Color(0xFF34D399))
+        RibbonItem(icon = Icons.Default.AutoAwesome, label = "✨ Auto Subs", onClick = onGenerateSubtitles, tint = Color(0xFFFBBF24))
         RibbonItem(icon = Icons.Default.Movie, label = "Split", onClick = onSplit)
         RibbonItem(icon = Icons.Default.Speed, label = "Speed", onClick = onSpeed)
         RibbonItem(icon = Icons.Default.FlashOn, label = "Transition", onClick = onTransition, tint = AccentPurple)
@@ -550,30 +638,52 @@ private fun EditorBottomToolbar(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF11131B))
+            .navigationBarsPadding()
             .horizontalScroll(rememberScrollState())
             .padding(vertical = 8.dp, horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         ToolbarActionItem(icon = Icons.Default.Add, label = "Media", onClick = { onActionClick(SheetType.ADD_MEDIA) })
-        ToolbarActionItem(icon = Icons.Default.Audiotrack, label = "Audio", onClick = { onActionClick(SheetType.AUDIO) })
+        ToolbarActionItem(
+            icon = Icons.Default.Movie,
+            label = "Edit / Trim",
+            isHighlighted = true,
+            highlightColor = Color(0xFF38BDF8),
+            onClick = { onActionClick(SheetType.CLIP_EDIT) }
+        )
         ToolbarActionItem(
             icon = Icons.Default.TextFields,
-            label = "Urdu Text",
+            label = "Add Text",
             isHighlighted = true,
-            highlightColor = AccentPink,
+            highlightColor = AccentAmber,
             onClick = { onActionClick(SheetType.SUBTITLES) }
         )
         ToolbarActionItem(
-            icon = Icons.Default.AutoAwesome,
-            label = "AI Studio",
+            icon = Icons.Default.Layers,
+            label = "Overlay (PiP)",
             isHighlighted = true,
-            highlightColor = AccentCyan,
-            onClick = { onActionClick(SheetType.AI_STUDIO) }
+            highlightColor = AccentPurple,
+            onClick = { onActionClick(SheetType.OVERLAY_PIP) }
         )
+        ToolbarActionItem(
+            icon = Icons.Default.Audiotrack,
+            label = "Audio & Voice",
+            isHighlighted = true,
+            highlightColor = Color(0xFF10B981),
+            onClick = { onActionClick(SheetType.AUDIO) }
+        )
+        ToolbarActionItem(
+            icon = Icons.Default.AutoAwesome,
+            label = "Auto Subs",
+            isHighlighted = true,
+            highlightColor = Color(0xFFFBBF24),
+            onClick = { onActionClick(SheetType.SUBTITLES) }
+        )
+        ToolbarActionItem(icon = Icons.Default.ColorLens, label = "Filters & LUTs", onClick = { onActionClick(SheetType.FILTERS) })
         ToolbarActionItem(icon = Icons.Default.FlashOn, label = "Transition", onClick = { onActionClick(SheetType.TRANSITIONS) })
         ToolbarActionItem(icon = Icons.Default.Layers, label = "Stickers", onClick = { onActionClick(SheetType.STICKERS) })
-        ToolbarActionItem(icon = Icons.Default.ColorLens, label = "Filters & LUTs", onClick = { onActionClick(SheetType.FILTERS) })
+        ToolbarActionItem(icon = Icons.Default.AutoAwesome, label = "AI Studio", onClick = { onActionClick(SheetType.AI_STUDIO) })
         ToolbarActionItem(icon = Icons.Default.Settings, label = "Settings", onClick = { onActionClick(SheetType.SETTINGS) })
     }
 }

@@ -44,7 +44,9 @@ enum class SheetType {
     TRANSITIONS,
     STICKERS,
     ADD_MEDIA,
-    SRT_EXPORT
+    SRT_EXPORT,
+    TEXT_EDIT,
+    OVERLAY_PIP
 }
 
 data class EditorUiState(
@@ -52,6 +54,8 @@ data class EditorUiState(
     val currentPlayheadMs: Long = 0L,
     val isPlaying: Boolean = false,
     val selectedClipId: String? = null,
+    val selectedSubtitleId: String? = null,
+    val selectedOverlayId: String? = null,
     val activeSheet: SheetType = SheetType.NONE,
     val recentProjects: List<Project> = emptyList(),
     val canUndo: Boolean = false,
@@ -276,6 +280,55 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun updateClipTrim(clipId: String, startTrimMs: Long, endTrimMs: Long) {
+        val project = _uiState.value.project
+        val targetClip = project.clips.firstOrNull { it.id == clipId } ?: return
+        val validStart = startTrimMs.coerceIn(0L, targetClip.durationMs - 200L)
+        val validEnd = endTrimMs.coerceIn(validStart + 200L, targetClip.durationMs)
+        pushHistory()
+        val updated = project.clips.map {
+            if (it.id == clipId) it.copy(startTrimMs = validStart, endTrimMs = validEnd) else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(clips = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun updateClipDuration(clipId: String, newEffectiveDurationMs: Long) {
+        val project = _uiState.value.project
+        val targetClip = project.clips.firstOrNull { it.id == clipId } ?: return
+        val clampedDuration = newEffectiveDurationMs.coerceAtLeast(200L)
+        pushHistory()
+        val neededRawDuration = (clampedDuration * targetClip.speed).toLong()
+        val newEndTrim = targetClip.startTrimMs + neededRawDuration
+        val updated = project.clips.map {
+            if (it.id == clipId) {
+                it.copy(
+                    endTrimMs = newEndTrim,
+                    durationMs = maxOf(it.durationMs, newEndTrim)
+                )
+            } else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(clips = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun selectOverlay(id: String?) {
+        _uiState.update { it.copy(selectedOverlayId = id) }
+    }
+
+    fun addOverlayClip(overlay: OverlayClip) {
+        pushHistory()
+        val updated = _uiState.value.project.overlays + overlay
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(overlays = updated, updatedAt = System.currentTimeMillis()),
+                selectedOverlayId = overlay.id
+            )
+        }
+    }
+
     fun updateOverlay(overlay: OverlayClip) {
         val updated = _uiState.value.project.overlays.map {
             if (it.id == overlay.id) overlay else it
@@ -285,20 +338,272 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    fun deleteOverlay(overlayId: String) {
-        pushHistory()
-        val updated = _uiState.value.project.overlays.filter { it.id != overlayId }
+    fun updateOverlayTransform(id: String, posX: Float, posY: Float, scale: Float, rotation: Float) {
+        val updated = _uiState.value.project.overlays.map {
+            if (it.id == id) it.copy(posX = posX, posY = posY, scale = scale, rotation = rotation) else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(overlays = updated))
+        }
+    }
+
+    fun updateOverlayDuration(id: String, startTimeMs: Long, durationMs: Long) {
+        val updated = _uiState.value.project.overlays.map {
+            if (it.id == id) it.copy(
+                startTimeMs = startTimeMs.coerceAtLeast(0L),
+                durationMs = durationMs.coerceAtLeast(200L)
+            ) else it
+        }
         _uiState.update {
             it.copy(project = it.project.copy(overlays = updated, updatedAt = System.currentTimeMillis()))
         }
     }
 
-    fun updateSubtitlePosition(id: String, posX: Float, posY: Float, scale: Float) {
+    fun updateOverlayChromaKey(
+        id: String,
+        enabled: Boolean,
+        colorHex: Long = 0xFF00FF00,
+        similarity: Float = 0.4f,
+        smoothness: Float = 0.1f
+    ) {
+        pushHistory()
+        val updated = _uiState.value.project.overlays.map {
+            if (it.id == id) it.copy(
+                chromaKeyEnabled = enabled,
+                chromaKeyColorHex = colorHex,
+                chromaSimilarity = similarity,
+                chromaSmoothness = smoothness
+            ) else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(overlays = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun deleteOverlay(overlayId: String) {
+        pushHistory()
+        val updated = _uiState.value.project.overlays.filter { it.id != overlayId }
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(overlays = updated, updatedAt = System.currentTimeMillis()),
+                selectedOverlayId = if (it.selectedOverlayId == overlayId) null else it.selectedOverlayId
+            )
+        }
+    }
+
+    fun selectSubtitle(id: String?) {
+        _uiState.update { it.copy(selectedSubtitleId = id) }
+    }
+
+    fun updateSubtitlePosition(id: String, posX: Float, posY: Float, scale: Float, rotation: Float = 0f) {
         val updated = _uiState.value.project.subtitles.map {
-            if (it.id == id) it.copy(posX = posX, posY = posY, scale = scale) else it
+            if (it.id == id) it.copy(posX = posX, posY = posY, scale = scale, rotation = rotation) else it
         }
         _uiState.update {
             it.copy(project = it.project.copy(subtitles = updated))
+        }
+    }
+
+    fun updateSubtitle(updatedClip: SubtitleClip) {
+        pushHistory()
+        val updated = _uiState.value.project.subtitles.map {
+            if (it.id == updatedClip.id) updatedClip else it
+        }
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()),
+                selectedSubtitleId = updatedClip.id
+            )
+        }
+    }
+
+    fun updateSubtitleDuration(id: String, startMs: Long, endMs: Long) {
+        val validStart = startMs.coerceAtLeast(0L)
+        val validEnd = maxOf(validStart + 200L, endMs)
+        val updated = _uiState.value.project.subtitles.map {
+            if (it.id == id) it.copy(startMs = validStart, endMs = validEnd) else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun deleteSubtitle(id: String) {
+        pushHistory()
+        val updated = _uiState.value.project.subtitles.filter { it.id != id }
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()),
+                selectedSubtitleId = if (it.selectedSubtitleId == id) null else it.selectedSubtitleId
+            )
+        }
+    }
+
+    fun addTextOverlay(
+        text: String = "نیا عنوان شامل کریں",
+        fontChoice: UrduFontChoice = UrduFontChoice.NOTO_NASTALIQ,
+        stylePreset: SubtitleStylePreset = SubtitleStylePreset.KARAOKE,
+        fontSizeSp: Float = 24f,
+        textColorHex: Long = 0xFFFFFFFF,
+        isRtl: Boolean = true
+    ) {
+        pushHistory()
+        val start = _uiState.value.currentPlayheadMs
+        val end = start + 3500L
+        val wordsList = text.trim().split(" ").filter { it.isNotBlank() }
+        val timedWords = if (wordsList.isNotEmpty()) {
+            val wordDur = 3500L / wordsList.size
+            wordsList.mapIndexed { idx, w ->
+                TimedWord(w, start + (idx * wordDur), start + ((idx + 1) * wordDur))
+            }
+        } else emptyList()
+
+        val newTextClip = SubtitleClip(
+            text = text,
+            startMs = start,
+            endMs = end,
+            fontChoice = fontChoice,
+            stylePreset = stylePreset,
+            fontSizeSp = fontSizeSp,
+            textColorHex = textColorHex,
+            isRtl = isRtl,
+            words = timedWords,
+            posX = 0.5f,
+            posY = 0.75f,
+            scale = 1.0f,
+            rotation = 0f
+        )
+        val updated = _uiState.value.project.subtitles + newTextClip
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()),
+                selectedSubtitleId = newTextClip.id
+            )
+        }
+    }
+
+    fun generateSubtitlesForProject() {
+        pushHistory()
+        val project = _uiState.value.project
+        val totalMs = project.totalDurationMs
+        val sampleUrduSentences = listOf(
+            "ہر مشکل کے بعد آسانی ہے",
+            "اپنے خوابوں پر یقین رکھیں اور محنت کریں",
+            "کامیابی صرف ایک قدم دور ہے",
+            "وقت کی قدر کریں اور آگے بڑھیں",
+            "یہ سفر آپ کی محنت سے خوبصورت ہے"
+        )
+        val stepMs = 4000L
+        val count = ((totalMs / stepMs).toInt() + 1).coerceAtLeast(1)
+        val generated = mutableListOf<SubtitleClip>()
+
+        for (i in 0 until minOf(count, 5)) {
+            val sStart = i * stepMs
+            val sEnd = minOf(sStart + 3500L, totalMs)
+            if (sStart >= totalMs) break
+            val line = sampleUrduSentences[i % sampleUrduSentences.size]
+            val words = line.split(" ")
+            val wordStep = (sEnd - sStart) / maxOf(1, words.size)
+            val timedWords = words.mapIndexed { wIdx, w ->
+                TimedWord(w, sStart + (wIdx * wordStep), sStart + ((wIdx + 1) * wordStep))
+            }
+            generated.add(
+                SubtitleClip(
+                    text = line,
+                    startMs = sStart,
+                    endMs = sEnd,
+                    fontChoice = UrduFontChoice.NOTO_NASTALIQ,
+                    stylePreset = SubtitleStylePreset.KARAOKE,
+                    fontSizeSp = 22f,
+                    isRtl = true,
+                    words = timedWords,
+                    posX = 0.5f,
+                    posY = 0.8f
+                )
+            )
+        }
+
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(subtitles = generated, updatedAt = System.currentTimeMillis()),
+                selectedSubtitleId = generated.firstOrNull()?.id
+            )
+        }
+    }
+
+    fun extractAudioFromClip(clipId: String? = null) {
+        pushHistory()
+        val project = _uiState.value.project
+        val targetClip = if (clipId != null) {
+            project.clips.firstOrNull { it.id == clipId }
+        } else {
+            project.clips.firstOrNull { it.id == _uiState.value.selectedClipId } ?: project.clips.firstOrNull()
+        } ?: return
+
+        val extractedTrack = AudioTrack(
+            name = "Extracted: ${targetClip.title}",
+            type = AudioType.BGM,
+            uriString = targetClip.uriString,
+            isExtracted = true,
+            startTimeMs = 0L,
+            durationMs = targetClip.effectiveDurationMs,
+            volume = 1.0f
+        )
+        val updated = project.audioTracks + extractedTrack
+        _uiState.update {
+            it.copy(project = it.project.copy(audioTracks = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun addLocalAudioTrack(name: String, uriString: String, durationMs: Long) {
+        pushHistory()
+        val track = AudioTrack(
+            name = name,
+            type = AudioType.BGM,
+            uriString = uriString,
+            isExtracted = false,
+            startTimeMs = _uiState.value.currentPlayheadMs,
+            durationMs = durationMs.coerceAtLeast(3000L),
+            volume = 0.9f
+        )
+        val updated = _uiState.value.project.audioTracks + track
+        _uiState.update {
+            it.copy(project = it.project.copy(audioTracks = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun addRecordedAudioTrack(name: String, uriString: String?, durationMs: Long) {
+        pushHistory()
+        val track = AudioTrack(
+            name = name,
+            type = AudioType.MIC_RECORDING,
+            uriString = uriString,
+            isExtracted = false,
+            startTimeMs = _uiState.value.currentPlayheadMs,
+            durationMs = durationMs.coerceAtLeast(1000L),
+            volume = 1.0f
+        )
+        val updated = _uiState.value.project.audioTracks + track
+        _uiState.update {
+            it.copy(project = it.project.copy(audioTracks = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun deleteAudioTrack(trackId: String) {
+        pushHistory()
+        val updated = _uiState.value.project.audioTracks.filter { it.id != trackId }
+        _uiState.update {
+            it.copy(project = it.project.copy(audioTracks = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun updateAudioTrack(track: AudioTrack) {
+        pushHistory()
+        val updated = _uiState.value.project.audioTracks.map {
+            if (it.id == track.id) track else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(audioTracks = updated, updatedAt = System.currentTimeMillis()))
         }
     }
 
@@ -306,14 +611,20 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
         pushHistory()
         val updated = _uiState.value.project.subtitles + subtitleClip
         _uiState.update {
-            it.copy(project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()))
+            it.copy(
+                project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()),
+                selectedSubtitleId = subtitleClip.id
+            )
         }
     }
 
     fun applyAiSubtitles(subtitles: List<SubtitleClip>) {
         pushHistory()
         _uiState.update {
-            it.copy(project = it.project.copy(subtitles = subtitles, updatedAt = System.currentTimeMillis()))
+            it.copy(
+                project = it.project.copy(subtitles = subtitles, updatedAt = System.currentTimeMillis()),
+                selectedSubtitleId = subtitles.firstOrNull()?.id
+            )
         }
     }
 
@@ -402,26 +713,13 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
             title = projectTitle,
             aspectRatio = resolvedRatio,
             clips = clips,
-            subtitles = listOf(
-                SubtitleClip(
-                    text = "اپنے منفرد انداز میں بنائیں",
-                    startMs = 500L,
-                    endMs = minOf(4000L, totalMs),
-                    fontChoice = UrduFontChoice.NOTO_NASTALIQ,
-                    stylePreset = SubtitleStylePreset.KARAOKE,
-                    words = listOf(
-                        TimedWord("اپنے", 500L, 1200L),
-                        TimedWord("منفرد انداز", 1200L, 2600L),
-                        TimedWord("میں بنائیں", 2600L, minOf(4000L, totalMs))
-                    )
-                )
-            ),
+            subtitles = emptyList(), // No default subtitles on import per Requirement 1
             audioTracks = listOf(
                 AudioTrack(
-                    name = "Vlog Beat Ambient",
+                    name = "Original Video Audio",
                     type = AudioType.BGM,
-                    durationMs = totalMs.coerceAtLeast(10000L),
-                    volume = 0.5f
+                    durationMs = totalMs.coerceAtLeast(5000L),
+                    volume = 1.0f
                 )
             )
         )
@@ -573,47 +871,7 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
                     secondaryColorHex = 0xFF06B6D4
                 )
             ),
-            subtitles = listOf(
-                SubtitleClip(
-                    text = "خواب دیکھنا آسان ہے",
-                    startMs = 0L,
-                    endMs = 3800L,
-                    fontChoice = UrduFontChoice.NOTO_NASTALIQ,
-                    stylePreset = SubtitleStylePreset.KARAOKE,
-                    isRtl = true,
-                    words = listOf(
-                        TimedWord("خواب", 0L, 1200L),
-                        TimedWord("دیکھنا", 1200L, 2400L),
-                        TimedWord("آسان ہے", 2400L, 3800L)
-                    )
-                ),
-                SubtitleClip(
-                    text = "مگر انہیں پورا کرنا اصل ہمت ہے",
-                    startMs = 4200L,
-                    endMs = 8800L,
-                    fontChoice = UrduFontChoice.GULZAR,
-                    stylePreset = SubtitleStylePreset.NEON_GLOW,
-                    isRtl = true,
-                    words = listOf(
-                        TimedWord("مگر", 4200L, 5200L),
-                        TimedWord("انہیں پورا کرنا", 5200L, 7000L),
-                        TimedWord("اصل ہمت ہے", 7000L, 8800L)
-                    )
-                ),
-                SubtitleClip(
-                    text = "آج ہی وہ پہلا قدم اٹھائیں!",
-                    startMs = 9200L,
-                    endMs = 14000L,
-                    fontChoice = UrduFontChoice.NOTO_NASTALIQ,
-                    stylePreset = SubtitleStylePreset.KARAOKE,
-                    isRtl = true,
-                    words = listOf(
-                        TimedWord("آج ہی وہ", 9200L, 10800L),
-                        TimedWord("پہلا قدم", 10800L, 12400L),
-                        TimedWord("اٹھائیں!", 12400L, 14000L)
-                    )
-                )
-            ),
+            subtitles = emptyList(), // Manual generation only per requirement
             audioTracks = listOf(
                 AudioTrack(
                     name = "Cinematic Beat",

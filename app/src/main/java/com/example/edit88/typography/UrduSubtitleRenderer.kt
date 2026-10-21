@@ -45,6 +45,9 @@ fun UrduSubtitleRenderer(
         UrduFontChoice.NOTO_NASTALIQ -> NotoNastaliqUrduFontFamily
         UrduFontChoice.GULZAR -> GulzarFontFamily
         UrduFontChoice.SYSTEM_SANS -> FontFamily.Default
+        UrduFontChoice.SERIF -> FontFamily.Serif
+        UrduFontChoice.IMPACT -> FontFamily.SansSerif
+        UrduFontChoice.CURSIVE -> FontFamily.Cursive
     }
 
     val direction = if (clip.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr

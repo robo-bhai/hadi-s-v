@@ -3,6 +3,7 @@ package com.example.edit88.ui.sheets
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -231,8 +232,9 @@ fun AddMediaSheet(
                             )
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                        border = ButtonDefaults.outlinedButtonBorder.copy(
-                            brush = Brush.linearGradient(listOf(Color(0xFF475569), Color(0xFF64748B)))
+                        border = BorderStroke(
+                            1.dp,
+                            Brush.linearGradient(listOf(Color(0xFF475569), Color(0xFF64748B)))
                         ),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.weight(1f)

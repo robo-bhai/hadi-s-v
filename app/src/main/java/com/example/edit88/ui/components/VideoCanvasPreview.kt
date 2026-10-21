@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,10 +28,16 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.RotateRight
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -69,10 +76,16 @@ fun VideoCanvasPreview(
     project: Project,
     currentPlayheadMs: Long,
     isPlaying: Boolean,
+    selectedSubtitleId: String? = null,
+    selectedOverlayId: String? = null,
     onTogglePlay: () -> Unit,
     onUpdateOverlay: ((OverlayClip) -> Unit)? = null,
     onDeleteOverlay: ((String) -> Unit)? = null,
-    onUpdateSubtitlePosition: ((String, Float, Float, Float) -> Unit)? = null,
+    onSelectOverlay: ((String?) -> Unit)? = null,
+    onSelectSubtitle: ((String?) -> Unit)? = null,
+    onUpdateSubtitlePosition: ((String, Float, Float, Float, Float) -> Unit)? = null,
+    onDeleteSubtitle: ((String) -> Unit)? = null,
+    onEditSubtitle: ((SubtitleClip) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     // Determine active clip at playhead
@@ -94,9 +107,9 @@ fun VideoCanvasPreview(
         clipLocalOffsetMs = activeClip.effectiveDurationMs
     }
 
-    // Active subtitles at playhead
+    // Active subtitles at playhead or currently selected subtitle
     val activeSubtitle = project.subtitles.firstOrNull {
-        currentPlayheadMs in it.startMs..it.endMs
+        it.id == selectedSubtitleId || (currentPlayheadMs in it.startMs..it.endMs)
     }
 
     // Active overlays at playhead
@@ -104,8 +117,8 @@ fun VideoCanvasPreview(
         currentPlayheadMs in it.startTimeMs..(it.startTimeMs + it.durationMs)
     }
 
-    var selectedOverlayId by remember { mutableStateOf<String?>(null) }
-    var isSubtitleSelected by remember { mutableStateOf(false) }
+    var internalSelectedOverlayId by remember(selectedOverlayId) { mutableStateOf(selectedOverlayId) }
+    val currentSelectedOverlayId = selectedOverlayId ?: internalSelectedOverlayId
 
     // Continuous visual motion animation
     val infiniteTransition = rememberInfiniteTransition(label = "canvas_anim")
@@ -162,8 +175,9 @@ fun VideoCanvasPreview(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = {
-                        selectedOverlayId = null
-                        isSubtitleSelected = false
+                        internalSelectedOverlayId = null
+                        onSelectOverlay?.invoke(null)
+                        onSelectSubtitle?.invoke(null)
                         onTogglePlay()
                     }
                 )
@@ -366,10 +380,11 @@ fun VideoCanvasPreview(
 
                 // Interactive Overlays with On-Canvas Bounding Box
                 activeOverlays.forEach { overlay ->
-                    val isSelected = overlay.id == selectedOverlayId
+                    val isSelected = overlay.id == currentSelectedOverlayId
                     var currentPosX by remember(overlay.posX) { mutableFloatStateOf(overlay.posX) }
                     var currentPosY by remember(overlay.posY) { mutableFloatStateOf(overlay.posY) }
                     var currentScale by remember(overlay.scale) { mutableFloatStateOf(overlay.scale) }
+                    var currentRotation by remember(overlay.rotation) { mutableFloatStateOf(overlay.rotation) }
 
                     Box(
                         modifier = Modifier
@@ -380,47 +395,88 @@ fun VideoCanvasPreview(
                                     ((currentPosY - 0.5f) * 360).roundToInt()
                                 )
                             }
-                            .rotate(overlay.rotation)
+                            .rotate(currentRotation)
                             .scale(currentScale)
                             .then(
                                 if (isSelected) {
                                     Modifier
-                                        .border(1.5.dp, Color(0xFF06B6D4), RoundedCornerShape(8.dp))
-                                        .background(Color(0x3306B6D4), RoundedCornerShape(8.dp))
+                                        .border(2.dp, Color(0xFF06B6D4), RoundedCornerShape(10.dp))
+                                        .background(Color(0x2206B6D4), RoundedCornerShape(10.dp))
                                 } else Modifier
                             )
                             .pointerInput(overlay.id) {
                                 detectDragGestures { change, dragAmount ->
                                     change.consume()
-                                    selectedOverlayId = overlay.id
-                                    isSubtitleSelected = false
+                                    internalSelectedOverlayId = overlay.id
+                                    onSelectOverlay?.invoke(overlay.id)
+                                    onSelectSubtitle?.invoke(null)
                                     currentPosX = (currentPosX + (dragAmount.x / 400f)).coerceIn(0.05f, 0.95f)
                                     currentPosY = (currentPosY + (dragAmount.y / 500f)).coerceIn(0.05f, 0.95f)
                                     onUpdateOverlay?.invoke(
-                                        overlay.copy(posX = currentPosX, posY = currentPosY, scale = currentScale)
+                                        overlay.copy(
+                                            posX = currentPosX,
+                                            posY = currentPosY,
+                                            scale = currentScale,
+                                            rotation = currentRotation
+                                        )
                                     )
                                 }
                             }
                             .clickable {
-                                selectedOverlayId = overlay.id
-                                isSubtitleSelected = false
+                                internalSelectedOverlayId = overlay.id
+                                onSelectOverlay?.invoke(overlay.id)
+                                onSelectSubtitle?.invoke(null)
                             }
                             .padding(8.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = overlay.iconEmoji,
-                            fontSize = 32.sp
-                        )
+                        // Media Content: Local Image / Video or Emoji
+                        if (!overlay.uriString.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(110.dp, 110.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .then(
+                                        if (overlay.chromaKeyEnabled) {
+                                            // Simulated green screen removal transparent checkerboard border
+                                            Modifier.border(2.dp, Color(0xFF10B981), RoundedCornerShape(8.dp))
+                                        } else Modifier
+                                    )
+                            ) {
+                                AsyncImage(
+                                    model = overlay.uriString,
+                                    contentDescription = overlay.label,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                                if (overlay.chromaKeyEnabled) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .fillMaxWidth()
+                                            .background(Color(0xCC065F46))
+                                            .padding(vertical = 2.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("CHROMA REMOVED", color = Color(0xFF6EE7B7), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = overlay.iconEmoji,
+                                fontSize = 34.sp
+                            )
+                        }
 
                         // On-Canvas Gizmo Handles when selected
                         if (isSelected) {
-                            // Delete button (Top-Right)
+                            // 1. Delete button (Top-Right)
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .offset(x = 10.dp, y = (-10).dp)
-                                    .size(18.dp)
+                                    .offset(x = 12.dp, y = (-12).dp)
+                                    .size(22.dp)
                                     .background(Color(0xFFEF4444), CircleShape)
                                     .clickable { onDeleteOverlay?.invoke(overlay.id) },
                                 contentAlignment = Alignment.Center
@@ -429,38 +485,121 @@ fun VideoCanvasPreview(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Delete",
                                     tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
 
-                            // Scale Handle (Bottom-Right)
+                            // 2. Chroma Key Toggle (Top-Left)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset(x = (-12).dp, y = (-12).dp)
+                                    .size(22.dp)
+                                    .background(
+                                        if (overlay.chromaKeyEnabled) Color(0xFF10B981) else Color(0xFF334155),
+                                        CircleShape
+                                    )
+                                    .clickable {
+                                        onUpdateOverlay?.invoke(
+                                            overlay.copy(chromaKeyEnabled = !overlay.chromaKeyEnabled)
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "Chroma Key",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+
+                            // 3. Scale Handle (Bottom-Right)
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
-                                    .offset(x = 8.dp, y = 8.dp)
-                                    .size(14.dp)
+                                    .offset(x = 10.dp, y = 10.dp)
+                                    .size(18.dp)
                                     .background(Color(0xFF06B6D4), CircleShape)
-                                    .border(1.dp, Color.White, CircleShape)
+                                    .border(1.5.dp, Color.White, CircleShape)
                                     .pointerInput(Unit) {
                                         detectDragGestures { change, dragAmount ->
                                             change.consume()
                                             val scaleDelta = (dragAmount.x + dragAmount.y) / 100f
-                                            currentScale = (currentScale + scaleDelta).coerceIn(0.5f, 3.0f)
+                                            currentScale = (currentScale + scaleDelta).coerceIn(0.4f, 4.0f)
                                             onUpdateOverlay?.invoke(
-                                                overlay.copy(scale = currentScale)
+                                                overlay.copy(
+                                                    scale = currentScale,
+                                                    posX = currentPosX,
+                                                    posY = currentPosY,
+                                                    rotation = currentRotation
+                                                )
                                             )
                                         }
                                     }
                             )
+
+                            // 4. Rotation Handle (Bottom-Center)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .offset(y = 24.dp)
+                                    .size(24.dp)
+                                    .background(Color(0xFF8B5CF6), CircleShape)
+                                    .border(1.5.dp, Color.White, CircleShape)
+                                    .pointerInput(Unit) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            currentRotation = (currentRotation + dragAmount.x * 0.8f) % 360f
+                                            onUpdateOverlay?.invoke(
+                                                overlay.copy(
+                                                    rotation = currentRotation,
+                                                    scale = currentScale,
+                                                    posX = currentPosX,
+                                                    posY = currentPosY
+                                                )
+                                            )
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.RotateRight,
+                                    contentDescription = "Rotate",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+
+                            // Rotation indicator pill
+                            if (currentRotation != 0f) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .offset(y = 52.dp)
+                                        .background(Color(0xCC0F172A), RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "${currentRotation.roundToInt()}°",
+                                        color = Color(0xFF06B6D4),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
-                // Active Subtitle / Urdu Captions with Interactive Placement
+                // Active Subtitle / Text Overlay with Interactive Placement & Rotation
                 if (activeSubtitle != null) {
+                    val isSubtitleSelected = (activeSubtitle.id == selectedSubtitleId)
                     var subPosX by remember(activeSubtitle.posX) { mutableFloatStateOf(activeSubtitle.posX) }
                     var subPosY by remember(activeSubtitle.posY) { mutableFloatStateOf(activeSubtitle.posY) }
                     var subScale by remember(activeSubtitle.scale) { mutableFloatStateOf(activeSubtitle.scale) }
+                    var subRotation by remember(activeSubtitle.rotation) { mutableFloatStateOf(activeSubtitle.rotation) }
+                    var isRotating by remember { mutableStateOf(false) }
 
                     Box(
                         modifier = Modifier
@@ -471,57 +610,155 @@ fun VideoCanvasPreview(
                                     ((subPosY - 0.5f) * 360).roundToInt()
                                 )
                             }
+                            .rotate(subRotation)
                             .scale(subScale)
                             .then(
                                 if (isSubtitleSelected) {
                                     Modifier
                                         .border(1.5.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp))
-                                        .background(Color(0x22F59E0B), RoundedCornerShape(8.dp))
+                                        .background(Color(0x33F59E0B), RoundedCornerShape(8.dp))
                                 } else Modifier
                             )
                             .pointerInput(activeSubtitle.id) {
                                 detectDragGestures { change, dragAmount ->
                                     change.consume()
-                                    isSubtitleSelected = true
-                                    selectedOverlayId = null
+                                    onSelectSubtitle?.invoke(activeSubtitle.id)
+                                    internalSelectedOverlayId = null
+                                    onSelectOverlay?.invoke(null)
                                     subPosX = (subPosX + (dragAmount.x / 400f)).coerceIn(0.05f, 0.95f)
                                     subPosY = (subPosY + (dragAmount.y / 500f)).coerceIn(0.05f, 0.95f)
                                     onUpdateSubtitlePosition?.invoke(
-                                        activeSubtitle.id, subPosX, subPosY, subScale
+                                        activeSubtitle.id, subPosX, subPosY, subScale, subRotation
                                     )
                                 }
                             }
                             .clickable {
-                                isSubtitleSelected = !isSubtitleSelected
-                                selectedOverlayId = null
+                                onSelectSubtitle?.invoke(if (isSubtitleSelected) null else activeSubtitle.id)
+                                internalSelectedOverlayId = null
+                                onSelectOverlay?.invoke(null)
                             }
-                            .padding(4.dp)
+                            .padding(6.dp)
                     ) {
                         UrduSubtitleRenderer(
                             clip = activeSubtitle,
                             currentPlayheadMs = currentPlayheadMs
                         )
 
-                        // Subtitle scale handle
                         if (isSubtitleSelected) {
+                            // 1. Delete Handle (Top-Right)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 10.dp, y = (-10).dp)
+                                    .size(20.dp)
+                                    .background(Color(0xFFEF4444), CircleShape)
+                                    .border(1.dp, Color.White, CircleShape)
+                                    .clickable { onDeleteSubtitle?.invoke(activeSubtitle.id) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Delete Text",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+
+                            // 2. Edit Text Handle (Top-Left)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset(x = (-10).dp, y = (-10).dp)
+                                    .size(20.dp)
+                                    .background(Color(0xFF3B82F6), CircleShape)
+                                    .border(1.dp, Color.White, CircleShape)
+                                    .clickable { onEditSubtitle?.invoke(activeSubtitle) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit Text",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+
+                            // 3. Scale Handle (Bottom-Right)
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
-                                    .offset(x = 6.dp, y = 6.dp)
-                                    .size(14.dp)
+                                    .offset(x = 10.dp, y = 10.dp)
+                                    .size(20.dp)
                                     .background(Color(0xFFF59E0B), CircleShape)
                                     .border(1.dp, Color.White, CircleShape)
-                                    .pointerInput(Unit) {
+                                    .pointerInput(activeSubtitle.id) {
                                         detectDragGestures { change, dragAmount ->
                                             change.consume()
                                             val scaleDelta = (dragAmount.x + dragAmount.y) / 100f
-                                            subScale = (subScale + scaleDelta).coerceIn(0.6f, 2.5f)
+                                            subScale = (subScale + scaleDelta).coerceIn(0.5f, 3.0f)
                                             onUpdateSubtitlePosition?.invoke(
-                                                activeSubtitle.id, subPosX, subPosY, subScale
+                                                activeSubtitle.id, subPosX, subPosY, subScale, subRotation
                                             )
                                         }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("↔", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            // 4. Rotation Handle (Bottom-Center stem)
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .offset(y = 28.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .background(Color(0xFF06B6D4), CircleShape)
+                                        .border(1.dp, Color.White, CircleShape)
+                                        .pointerInput(activeSubtitle.id) {
+                                            detectDragGestures(
+                                                onDragStart = { isRotating = true },
+                                                onDragEnd = { isRotating = false },
+                                                onDragCancel = { isRotating = false }
+                                            ) { change, dragAmount ->
+                                                change.consume()
+                                                val deltaDeg = dragAmount.x * 0.9f
+                                                subRotation = (subRotation + deltaDeg) % 360f
+                                                if (subRotation < 0f) subRotation += 360f
+                                                onUpdateSubtitlePosition?.invoke(
+                                                    activeSubtitle.id, subPosX, subPosY, subScale, subRotation
+                                                )
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.RotateRight,
+                                        contentDescription = "Rotate Text",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                if (isRotating || subRotation != 0f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(top = 2.dp)
+                                            .background(Color(0xDD000000), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = "${subRotation.roundToInt()}°",
+                                            color = Color(0xFF67E8F9),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
-                            )
+                                }
+                            }
                         }
                     }
                 }

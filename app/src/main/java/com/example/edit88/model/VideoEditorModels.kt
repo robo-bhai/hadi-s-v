@@ -106,6 +106,8 @@ data class AudioTrack(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val type: AudioType = AudioType.BGM,
+    val uriString: String? = null,
+    val isExtracted: Boolean = false,
     val startTimeMs: Long = 0L,
     val durationMs: Long = 10000L,
     val volume: Float = 0.8f,
@@ -120,7 +122,10 @@ data class AudioTrack(
 enum class UrduFontChoice(val label: String) {
     NOTO_NASTALIQ("Noto Nastaliq (اردو)"),
     GULZAR("Gulzar Nastaliq (گلزار)"),
-    SYSTEM_SANS("Modern Sans")
+    SYSTEM_SANS("Modern Sans"),
+    SERIF("Classic Serif"),
+    IMPACT("Bold Impact"),
+    CURSIVE("Script / Cursive")
 }
 
 enum class SubtitleStylePreset(val label: String) {
@@ -161,13 +166,20 @@ data class OverlayClip(
     val id: String = UUID.randomUUID().toString(),
     val label: String,
     val iconEmoji: String = "✨",
+    val uriString: String? = null,
+    val isVideo: Boolean = false,
     val startTimeMs: Long = 0L,
     val durationMs: Long = 4000L,
     val posX: Float = 0.5f, // Normalized 0f - 1f
-    val posY: Float = 0.25f,
+    val posY: Float = 0.35f,
     val scale: Float = 1.0f,
     val rotation: Float = 0f,
-    val opacity: Float = 0.9f
+    val opacity: Float = 0.95f,
+    // CapCut Pro Chroma Key (Green Screen Removal)
+    val chromaKeyEnabled: Boolean = false,
+    val chromaKeyColorHex: Long = 0xFF00FF00, // Default green screen 0x00FF00
+    val chromaSimilarity: Float = 0.4f,       // 0.1f to 1.0f
+    val chromaSmoothness: Float = 0.1f        // edge blend
 )
 
 data class Project(
