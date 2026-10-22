@@ -56,12 +56,25 @@ data class EditorUiState(
     val selectedClipId: String? = null,
     val selectedSubtitleId: String? = null,
     val selectedOverlayId: String? = null,
+    val selectedAudioTrackId: String? = null,
     val activeSheet: SheetType = SheetType.NONE,
     val recentProjects: List<Project> = emptyList(),
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     val timelineZoom: Float = 1.0f
-)
+) {
+    val hasSelection: Boolean
+        get() = selectedClipId != null || selectedSubtitleId != null || selectedOverlayId != null || selectedAudioTrackId != null
+
+    val selectedTypeLabel: String
+        get() = when {
+            selectedAudioTrackId != null -> "Audio"
+            selectedSubtitleId != null -> "Text"
+            selectedOverlayId != null -> "Overlay"
+            selectedClipId != null -> "Clip"
+            else -> "Item"
+        }
+}
 
 class VideoEditorViewModel(application: Application) : AndroidViewModel(application) {
     val settingsRepository = SettingsRepository(application)
@@ -157,8 +170,120 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.update { it.copy(currentPlayheadMs = bounded) }
     }
 
-    fun selectClip(id: String) {
-        _uiState.update { it.copy(selectedClipId = id) }
+    fun selectClip(id: String?) {
+        _uiState.update {
+            it.copy(
+                selectedClipId = id,
+                selectedSubtitleId = if (id != null) null else it.selectedSubtitleId,
+                selectedOverlayId = if (id != null) null else it.selectedOverlayId,
+                selectedAudioTrackId = if (id != null) null else it.selectedAudioTrackId
+            )
+        }
+    }
+
+    fun selectAudioTrack(id: String?) {
+        _uiState.update {
+            it.copy(
+                selectedAudioTrackId = id,
+                selectedClipId = if (id != null) null else it.selectedClipId,
+                selectedSubtitleId = if (id != null) null else it.selectedSubtitleId,
+                selectedOverlayId = if (id != null) null else it.selectedOverlayId
+            )
+        }
+    }
+
+    fun deselectAll() {
+        _uiState.update {
+            it.copy(
+                selectedClipId = null,
+                selectedSubtitleId = null,
+                selectedOverlayId = null,
+                selectedAudioTrackId = null
+            )
+        }
+    }
+
+    fun deleteSelected() {
+        val state = _uiState.value
+        when {
+            state.selectedAudioTrackId != null -> {
+                deleteAudioTrack(state.selectedAudioTrackId)
+            }
+            state.selectedSubtitleId != null -> {
+                deleteSubtitle(state.selectedSubtitleId)
+            }
+            state.selectedOverlayId != null -> {
+                deleteOverlay(state.selectedOverlayId)
+            }
+            state.selectedClipId != null -> {
+                deleteSelectedClip()
+            }
+            state.project.clips.isNotEmpty() -> {
+                val first = state.project.clips.firstOrNull()
+                if (first != null) {
+                    _uiState.update { it.copy(selectedClipId = first.id) }
+                    deleteSelectedClip()
+                }
+            }
+        }
+    }
+
+    fun reorderClips(fromIndex: Int, toIndex: Int) {
+        val currentClips = _uiState.value.project.clips
+        if (fromIndex !in currentClips.indices || toIndex !in currentClips.indices || fromIndex == toIndex) return
+        pushHistory()
+        val mutable = currentClips.toMutableList()
+        val item = mutable.removeAt(fromIndex)
+        mutable.add(toIndex, item)
+        _uiState.update {
+            it.copy(
+                project = it.project.copy(clips = mutable, updatedAt = System.currentTimeMillis()),
+                selectedClipId = item.id
+            )
+        }
+    }
+
+    fun moveClip(clipId: String, deltaIndices: Int) {
+        val currentClips = _uiState.value.project.clips
+        val idx = currentClips.indexOfFirst { it.id == clipId }
+        if (idx == -1) return
+        val targetIdx = (idx + deltaIndices).coerceIn(0, currentClips.size - 1)
+        if (idx != targetIdx) {
+            reorderClips(idx, targetIdx)
+        }
+    }
+
+    fun moveAudioTrack(trackId: String, newStartTimeMs: Long) {
+        val validStart = newStartTimeMs.coerceAtLeast(0L)
+        val updated = _uiState.value.project.audioTracks.map {
+            if (it.id == trackId) it.copy(startTimeMs = validStart) else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(audioTracks = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun moveSubtitle(subtitleId: String, newStartMs: Long) {
+        val validStart = newStartMs.coerceAtLeast(0L)
+        val updated = _uiState.value.project.subtitles.map {
+            if (it.id == subtitleId) {
+                val dur = it.endMs - it.startMs
+                it.copy(startMs = validStart, endMs = validStart + dur)
+            } else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun moveOverlay(overlayId: String, newStartMs: Long) {
+        val validStart = newStartMs.coerceAtLeast(0L)
+        val updated = _uiState.value.project.overlays.map {
+            if (it.id == overlayId) it.copy(startTimeMs = validStart) else it
+        }
+        _uiState.update {
+            it.copy(project = it.project.copy(overlays = updated, updatedAt = System.currentTimeMillis()))
+        }
     }
 
     fun openSheet(sheet: SheetType) {
@@ -227,7 +352,6 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
 
     fun deleteSelectedClip() {
         val selectedId = _uiState.value.selectedClipId ?: return
-        if (_uiState.value.project.clips.size <= 1) return // Keep at least one clip
         pushHistory()
         val updated = _uiState.value.project.clips.filter { it.id != selectedId }
         _uiState.update {
@@ -593,7 +717,10 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
         pushHistory()
         val updated = _uiState.value.project.audioTracks.filter { it.id != trackId }
         _uiState.update {
-            it.copy(project = it.project.copy(audioTracks = updated, updatedAt = System.currentTimeMillis()))
+            it.copy(
+                project = it.project.copy(audioTracks = updated, updatedAt = System.currentTimeMillis()),
+                selectedAudioTrackId = if (it.selectedAudioTrackId == trackId) null else it.selectedAudioTrackId
+            )
         }
     }
 

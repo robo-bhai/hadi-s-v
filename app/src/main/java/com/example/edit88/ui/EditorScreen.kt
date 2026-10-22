@@ -207,6 +207,8 @@ fun EditorScreen(
             // 3. Quick Clip Tools Floating Ribbon
             ClipActionRibbon(
                 selectedClipId = uiState.selectedClipId,
+                hasSelection = uiState.hasSelection,
+                selectedTypeLabel = uiState.selectedTypeLabel,
                 onAddClip = { viewModel.openSheet(SheetType.ADD_MEDIA) },
                 onEditClip = { viewModel.openSheet(SheetType.CLIP_EDIT) },
                 onAddText = { viewModel.openSheet(SheetType.SUBTITLES) },
@@ -218,7 +220,7 @@ fun EditorScreen(
                 onTransition = { viewModel.openSheet(SheetType.TRANSITIONS) },
                 onStickers = { viewModel.openSheet(SheetType.STICKERS) },
                 onDuplicate = { viewModel.duplicateSelectedClip() },
-                onDelete = { viewModel.deleteSelectedClip() },
+                onDelete = { viewModel.deleteSelected() },
                 onFilter = { viewModel.openSheet(SheetType.FILTERS) },
                 onExportSrt = { viewModel.openSheet(SheetType.SRT_EXPORT) }
             )
@@ -228,12 +230,18 @@ fun EditorScreen(
                 project = project,
                 currentPlayheadMs = uiState.currentPlayheadMs,
                 selectedClipId = uiState.selectedClipId,
+                selectedAudioTrackId = uiState.selectedAudioTrackId,
                 selectedSubtitleId = uiState.selectedSubtitleId,
                 selectedOverlayId = uiState.selectedOverlayId,
                 timelineZoom = uiState.timelineZoom,
                 onSelectClip = { viewModel.selectClip(it) },
+                onSelectAudioTrack = { viewModel.selectAudioTrack(it) },
                 onSelectSubtitle = { viewModel.selectSubtitle(it) },
                 onSelectOverlay = { viewModel.selectOverlay(it) },
+                onReorderClips = { from, to -> viewModel.reorderClips(from, to) },
+                onMoveAudioTrack = { id, start -> viewModel.moveAudioTrack(id, start) },
+                onMoveSubtitle = { id, start -> viewModel.moveSubtitle(id, start) },
+                onMoveOverlay = { id, start -> viewModel.moveOverlay(id, start) },
                 onUpdateSubtitleDuration = { id, start, end -> viewModel.updateSubtitleDuration(id, start, end) },
                 onUpdateClipTrim = { id, start, end -> viewModel.updateClipTrim(id, start, end) },
                 onUpdateOverlayDuration = { id, start, dur -> viewModel.updateOverlayDuration(id, start, dur) },
@@ -569,6 +577,8 @@ private fun PlaybackBar(
 @Composable
 private fun ClipActionRibbon(
     selectedClipId: String?,
+    hasSelection: Boolean = false,
+    selectedTypeLabel: String = "",
     onAddClip: () -> Unit,
     onEditClip: () -> Unit,
     onAddText: () -> Unit,
@@ -606,7 +616,13 @@ private fun ClipActionRibbon(
         RibbonItem(icon = Icons.Default.ContentCopy, label = "Duplicate", onClick = onDuplicate)
         RibbonItem(icon = Icons.Default.ColorLens, label = "Grading", onClick = onFilter)
         RibbonItem(icon = Icons.Default.Subtitles, label = ".SRT Subtitles", onClick = onExportSrt, tint = Color(0xFFFBBF24))
-        RibbonItem(icon = Icons.Default.Delete, label = "Delete", onClick = onDelete, tint = Color(0xFFF87171))
+        RibbonItem(
+            icon = Icons.Default.Delete,
+            label = if (hasSelection) "Delete $selectedTypeLabel" else "Delete",
+            onClick = onDelete,
+            tint = Color(0xFFF87171),
+            highlighted = hasSelection
+        )
     }
 }
 
@@ -615,18 +631,27 @@ private fun RibbonItem(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
-    tint: Color = Color(0xFFCBD5E1)
+    tint: Color = Color(0xFFCBD5E1),
+    highlighted: Boolean = false
 ) {
     Row(
         modifier = Modifier
-            .background(Color(0xFF222636), RoundedCornerShape(8.dp))
+            .background(
+                if (highlighted) Color(0xFFEF4444).copy(alpha = 0.2f) else Color(0xFF222636),
+                RoundedCornerShape(8.dp)
+            )
+            .border(
+                width = if (highlighted) 1.dp else 0.dp,
+                color = if (highlighted) Color(0xFFF87171) else Color.Transparent,
+                shape = RoundedCornerShape(8.dp)
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(14.dp))
         Spacer(modifier = Modifier.width(4.dp))
-        Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = tint, fontSize = 11.sp, fontWeight = if (highlighted) FontWeight.Bold else FontWeight.Medium)
     }
 }
 
