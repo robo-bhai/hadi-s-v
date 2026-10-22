@@ -203,8 +203,10 @@ data class Project(
 }
 
 enum class ExportResolution(val label: String, val width: Int, val height: Int) {
+    P480("480p SD", 480, 854),
     P720("720p HD", 720, 1280),
     P1080("1080p Full HD", 1080, 1920),
+    P2K("2K QHD", 1440, 2560),
     P4K("4K Ultra HD", 2160, 3840)
 }
 

@@ -1,9 +1,15 @@
 package com.example.edit88.ui.components
 
+import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +37,7 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -42,13 +49,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.edit88.model.AudioTrack
 import com.example.edit88.model.MediaClip
 import com.example.edit88.model.OverlayClip
@@ -64,17 +77,47 @@ import com.example.ui.theme.TrackVideoColor
 
 import com.example.edit88.model.TransitionType
 
+fun triggerHapticFeedback(context: Context, haptic: HapticFeedback?) {
+    try {
+        haptic?.performHapticFeedback(HapticFeedbackType.LongPress)
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+            vibratorManager?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+        if (vibrator?.hasVibrator() == true) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(50L, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(50L)
+            }
+        }
+    } catch (_: Exception) {
+        // Safe fallback
+    }
+}
+
+
 @Composable
 fun MultiTrackTimeline(
     project: Project,
     currentPlayheadMs: Long,
     selectedClipId: String?,
+    selectedAudioTrackId: String? = null,
     selectedSubtitleId: String? = null,
     selectedOverlayId: String? = null,
     timelineZoom: Float = 1.0f,
     onSelectClip: (String) -> Unit,
+    onSelectAudioTrack: ((String) -> Unit)? = null,
     onSelectSubtitle: ((String) -> Unit)? = null,
     onSelectOverlay: ((String) -> Unit)? = null,
+    onReorderClips: ((Int, Int) -> Unit)? = null,
+    onMoveAudioTrack: ((String, Long) -> Unit)? = null,
+    onMoveSubtitle: ((String, Long) -> Unit)? = null,
+    onMoveOverlay: ((String, Long) -> Unit)? = null,
     onUpdateSubtitleDuration: ((String, Long, Long) -> Unit)? = null,
     onUpdateClipTrim: ((String, Long, Long) -> Unit)? = null,
     onUpdateOverlayDuration: ((String, Long, Long) -> Unit)? = null,
@@ -204,6 +247,7 @@ fun MultiTrackTimeline(
                             msPerDp = msPerDp,
                             selectedClipId = selectedClipId,
                             onSelectClip = onSelectClip,
+                            onReorderClips = onReorderClips,
                             onUpdateClipTrim = onUpdateClipTrim,
                             onAddClipClick = onAddVideoClipClick
                         )
@@ -214,6 +258,7 @@ fun MultiTrackTimeline(
                             msPerDp = msPerDp,
                             selectedOverlayId = selectedOverlayId,
                             onSelectOverlay = onSelectOverlay,
+                            onMoveOverlay = onMoveOverlay,
                             onUpdateOverlayDuration = onUpdateOverlayDuration,
                             onAddOverlayClick = onAddOverlayClick,
                             onSeekTo = onSeekTo
@@ -225,6 +270,7 @@ fun MultiTrackTimeline(
                             msPerDp = msPerDp,
                             selectedSubtitleId = selectedSubtitleId,
                             onSelectSubtitle = onSelectSubtitle,
+                            onMoveSubtitle = onMoveSubtitle,
                             onUpdateSubtitleDuration = onUpdateSubtitleDuration,
                             onAddTextClick = onAddTextClick,
                             onGenerateSubtitlesClick = onGenerateSubtitlesClick,
@@ -235,6 +281,9 @@ fun MultiTrackTimeline(
                         AudioTrackRow(
                             audioTracks = project.audioTracks,
                             msPerDp = msPerDp,
+                            selectedAudioTrackId = selectedAudioTrackId,
+                            onSelectAudioTrack = onSelectAudioTrack,
+                            onMoveAudioTrack = onMoveAudioTrack,
                             onAddAudioClick = onAddAudioClick,
                             onSeekTo = onSeekTo
                         )
@@ -300,9 +349,14 @@ private fun VideoTrackRow(
     msPerDp: Float,
     selectedClipId: String?,
     onSelectClip: (String) -> Unit,
+    onReorderClips: ((Int, Int) -> Unit)? = null,
     onUpdateClipTrim: ((String, Long, Long) -> Unit)? = null,
     onAddClipClick: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -325,14 +379,24 @@ private fun VideoTrackRow(
                 Text("+ Add Media", color = Color(0xFF94A3B8), fontSize = 11.sp)
             }
         } else {
-            clips.forEach { mediaClip ->
+            clips.forEachIndexed { clipIndex, mediaClip ->
                 val clipWidthDp = (mediaClip.effectiveDurationMs / msPerDp).dp.coerceAtLeast(36.dp)
                 val isSelected = mediaClip.id == selectedClipId
+                var isDragging by remember { mutableStateOf(false) }
+                var dragAccumulatedPx by remember { mutableFloatStateOf(0f) }
+                val clipWidthPx = with(density) { clipWidthDp.toPx() }
 
                 Box(
                     modifier = Modifier
                         .width(clipWidthDp)
                         .height(34.dp)
+                        .zIndex(if (isDragging) 10f else 1f)
+                        .graphicsLayer {
+                            translationX = if (isDragging) dragAccumulatedPx.coerceIn(-clipWidthPx * 1.2f, clipWidthPx * 1.2f) else 0f
+                            scaleX = if (isDragging) 1.05f else 1f
+                            scaleY = if (isDragging) 1.05f else 1f
+                            shadowElevation = if (isDragging) 8f else 0f
+                        }
                         .clip(RoundedCornerShape(4.dp))
                         .background(
                             Brush.horizontalGradient(
@@ -343,18 +407,50 @@ private fun VideoTrackRow(
                             )
                         )
                         .border(
-                            width = if (isSelected) 2.dp else 0.5.dp,
-                            color = if (isSelected) Color(0xFFFACC15) else Color.White.copy(alpha = 0.2f),
+                            width = if (isDragging) 2.dp else if (isSelected) 2.dp else 0.5.dp,
+                            color = if (isDragging) Color(0xFF38BDF8) else if (isSelected) Color(0xFFFACC15) else Color.White.copy(alpha = 0.2f),
                             shape = RoundedCornerShape(4.dp)
                         )
                         .clickable { onSelectClip(mediaClip.id) }
+                        .pointerInput(mediaClip.id, clipIndex, clips.size) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    isDragging = true
+                                    dragAccumulatedPx = 0f
+                                    onSelectClip(mediaClip.id)
+                                    triggerHapticFeedback(context, haptic)
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragAccumulatedPx += dragAmount.x
+                                    val thresholdPx = clipWidthPx * 0.45f
+                                    if (dragAccumulatedPx > thresholdPx && clipIndex < clips.size - 1) {
+                                        onReorderClips?.invoke(clipIndex, clipIndex + 1)
+                                        triggerHapticFeedback(context, haptic)
+                                        dragAccumulatedPx = 0f
+                                    } else if (dragAccumulatedPx < -thresholdPx && clipIndex > 0) {
+                                        onReorderClips?.invoke(clipIndex, clipIndex - 1)
+                                        triggerHapticFeedback(context, haptic)
+                                        dragAccumulatedPx = 0f
+                                    }
+                                },
+                                onDragEnd = {
+                                    isDragging = false
+                                    dragAccumulatedPx = 0f
+                                },
+                                onDragCancel = {
+                                    isDragging = false
+                                    dragAccumulatedPx = 0f
+                                }
+                            )
+                        }
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Left Trim Handle on selected clip
-                        if (isSelected) {
+                        if (isSelected && !isDragging) {
                             Box(
                                 modifier = Modifier
                                     .width(8.dp)
@@ -382,7 +478,16 @@ private fun VideoTrackRow(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (mediaClip.isLocalVideo) {
+                                if (isDragging) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color(0xFF38BDF8), RoundedCornerShape(2.dp))
+                                            .padding(horizontal = 3.dp, vertical = 1.dp)
+                                    ) {
+                                        Text("MOVE ⟷", color = Color.Black, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                } else if (mediaClip.isLocalVideo) {
                                     Box(
                                         modifier = Modifier
                                             .background(Color(0xFF06B6D4), RoundedCornerShape(2.dp))
@@ -419,7 +524,7 @@ private fun VideoTrackRow(
                         }
 
                         // Right Trim Handle on selected clip
-                        if (isSelected) {
+                        if (isSelected && !isDragging) {
                             Box(
                                 modifier = Modifier
                                     .width(8.dp)
@@ -480,10 +585,14 @@ private fun OverlayTrackRow(
     msPerDp: Float,
     selectedOverlayId: String? = null,
     onSelectOverlay: ((String) -> Unit)? = null,
+    onMoveOverlay: ((String, Long) -> Unit)? = null,
     onUpdateOverlayDuration: ((String, Long, Long) -> Unit)? = null,
     onAddOverlayClick: (() -> Unit)? = null,
     onSeekTo: (Long) -> Unit
 ) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -506,7 +615,13 @@ private fun OverlayTrackRow(
         } else {
             overlays.forEach { overlay ->
                 val isSelected = overlay.id == selectedOverlayId
-                val startDp = (overlay.startTimeMs / msPerDp).dp
+                var isDragging by remember { mutableStateOf(false) }
+                var dragStartMs by remember { mutableLongStateOf(overlay.startTimeMs) }
+                LaunchedEffect(overlay.startTimeMs) {
+                    if (!isDragging) dragStartMs = overlay.startTimeMs
+                }
+                val currentStartMs = if (isDragging) dragStartMs else overlay.startTimeMs
+                val startDp = (currentStartMs / msPerDp).dp
                 val widthDp = (overlay.durationMs / msPerDp).dp.coerceAtLeast(36.dp)
 
                 Box(
@@ -514,23 +629,47 @@ private fun OverlayTrackRow(
                         .offset(x = startDp)
                         .width(widthDp)
                         .height(30.dp)
+                        .zIndex(if (isDragging) 10f else 1f)
+                        .graphicsLayer {
+                            scaleX = if (isDragging) 1.05f else 1f
+                            scaleY = if (isDragging) 1.05f else 1f
+                            shadowElevation = if (isDragging) 8f else 0f
+                        }
                         .clip(RoundedCornerShape(4.dp))
-                        .background(if (isSelected) Color(0xFF9333EA) else Color(0xFF7E22CE))
+                        .background(if (isDragging) Color(0xFFA855F7) else if (isSelected) Color(0xFF9333EA) else Color(0xFF7E22CE))
                         .border(
-                            width = if (isSelected) 1.5.dp else 0.5.dp,
-                            color = if (isSelected) Color(0xFFFDE047) else Color(0xFFA855F7),
+                            width = if (isDragging || isSelected) 2.dp else 0.5.dp,
+                            color = if (isDragging) Color(0xFFE9D5FF) else if (isSelected) Color(0xFFFDE047) else Color(0xFFA855F7),
                             shape = RoundedCornerShape(4.dp)
                         )
                         .clickable {
                             onSelectOverlay?.invoke(overlay.id)
                             onSeekTo(overlay.startTimeMs)
                         }
+                        .pointerInput(overlay.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    isDragging = true
+                                    dragStartMs = overlay.startTimeMs
+                                    onSelectOverlay?.invoke(overlay.id)
+                                    triggerHapticFeedback(context, haptic)
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                    dragStartMs = (dragStartMs + deltaMs).coerceAtLeast(0L)
+                                    onMoveOverlay?.invoke(overlay.id, dragStartMs)
+                                },
+                                onDragEnd = { isDragging = false },
+                                onDragCancel = { isDragging = false }
+                            )
+                        }
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (isSelected) {
+                        if (isSelected && !isDragging) {
                             Box(
                                 modifier = Modifier
                                     .width(8.dp)
@@ -558,13 +697,13 @@ private fun OverlayTrackRow(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "${overlay.iconEmoji} ${overlay.label}",
+                                text = if (isDragging) "⟷ ${overlay.label}" else "${overlay.iconEmoji} ${overlay.label}",
                                 color = Color.White,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1
                             )
-                            if (overlay.chromaKeyEnabled) {
+                            if (overlay.chromaKeyEnabled && !isDragging) {
                                 Box(
                                     modifier = Modifier
                                         .background(Color(0xFF10B981), RoundedCornerShape(2.dp))
@@ -575,7 +714,7 @@ private fun OverlayTrackRow(
                             }
                         }
 
-                        if (isSelected) {
+                        if (isSelected && !isDragging) {
                             Box(
                                 modifier = Modifier
                                     .width(8.dp)
@@ -627,11 +766,15 @@ private fun SubtitleTrackRow(
     msPerDp: Float,
     selectedSubtitleId: String?,
     onSelectSubtitle: ((String) -> Unit)?,
+    onMoveSubtitle: ((String, Long) -> Unit)? = null,
     onUpdateSubtitleDuration: ((String, Long, Long) -> Unit)?,
     onAddTextClick: (() -> Unit)?,
     onGenerateSubtitlesClick: (() -> Unit)?,
     onSeekTo: (Long) -> Unit
 ) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -668,24 +811,55 @@ private fun SubtitleTrackRow(
         } else {
             subtitles.forEach { sub ->
                 val isSelected = sub.id == selectedSubtitleId
-                val startDp = (sub.startMs / msPerDp).dp
-                val widthDp = ((sub.endMs - sub.startMs) / msPerDp).dp.coerceAtLeast(36.dp)
+                var isDragging by remember { mutableStateOf(false) }
+                var dragStartMs by remember { mutableLongStateOf(sub.startMs) }
+                LaunchedEffect(sub.startMs) {
+                    if (!isDragging) dragStartMs = sub.startMs
+                }
+                val currentStartMs = if (isDragging) dragStartMs else sub.startMs
+                val durMs = (sub.endMs - sub.startMs).coerceAtLeast(300L)
+                val startDp = (currentStartMs / msPerDp).dp
+                val widthDp = (durMs / msPerDp).dp.coerceAtLeast(36.dp)
 
                 Box(
                     modifier = Modifier
                         .offset(x = startDp)
                         .width(widthDp)
                         .height(32.dp)
+                        .zIndex(if (isDragging) 10f else 1f)
+                        .graphicsLayer {
+                            scaleX = if (isDragging) 1.05f else 1f
+                            scaleY = if (isDragging) 1.05f else 1f
+                            shadowElevation = if (isDragging) 8f else 0f
+                        }
                         .clip(RoundedCornerShape(4.dp))
-                        .background(if (isSelected) Color(0xFFD97706) else Color(0xFF92400E))
+                        .background(if (isDragging) Color(0xFFEA580C) else if (isSelected) Color(0xFFD97706) else Color(0xFF92400E))
                         .border(
-                            width = if (isSelected) 1.5.dp else 0.5.dp,
-                            color = if (isSelected) Color(0xFFFDE047) else Color(0xFFF59E0B),
+                            width = if (isDragging || isSelected) 2.dp else 0.5.dp,
+                            color = if (isDragging) Color(0xFFFDE047) else if (isSelected) Color(0xFFFACC15) else Color(0xFFF59E0B),
                             shape = RoundedCornerShape(4.dp)
                         )
                         .clickable {
                             onSelectSubtitle?.invoke(sub.id)
                             onSeekTo(sub.startMs)
+                        }
+                        .pointerInput(sub.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    isDragging = true
+                                    dragStartMs = sub.startMs
+                                    onSelectSubtitle?.invoke(sub.id)
+                                    triggerHapticFeedback(context, haptic)
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                    dragStartMs = (dragStartMs + deltaMs).coerceAtLeast(0L)
+                                    onMoveSubtitle?.invoke(sub.id, dragStartMs)
+                                },
+                                onDragEnd = { isDragging = false },
+                                onDragCancel = { isDragging = false }
+                            )
                         }
                         .padding(horizontal = 1.dp),
                     contentAlignment = Alignment.Center
@@ -696,7 +870,7 @@ private fun SubtitleTrackRow(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Left trim handle (adjust startMs)
-                        if (isSelected) {
+                        if (isSelected && !isDragging) {
                             Box(
                                 modifier = Modifier
                                     .width(10.dp)
@@ -724,16 +898,16 @@ private fun SubtitleTrackRow(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = sub.text,
+                                text = if (isDragging) "⟷ ${sub.text}" else sub.text,
                                 color = Color.White,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1
                             )
-                            if (isSelected) {
-                                val durSec = (sub.endMs - sub.startMs) / 1000f
+                            if (isSelected || isDragging) {
+                                val durSec = durMs / 1000f
                                 Text(
-                                    text = String.format("%.1fs", durSec),
+                                    text = if (isDragging) String.format("@%.1fs", currentStartMs / 1000f) else String.format("%.1fs", durSec),
                                     color = Color(0xFFFEF08A),
                                     fontSize = 8.sp,
                                     fontWeight = FontWeight.ExtraBold
@@ -742,7 +916,7 @@ private fun SubtitleTrackRow(
                         }
 
                         // Right trim handle (adjust endMs)
-                        if (isSelected) {
+                        if (isSelected && !isDragging) {
                             Box(
                                 modifier = Modifier
                                     .width(10.dp)
@@ -792,9 +966,15 @@ private fun SubtitleTrackRow(
 private fun AudioTrackRow(
     audioTracks: List<AudioTrack>,
     msPerDp: Float,
+    selectedAudioTrackId: String? = null,
+    onSelectAudioTrack: ((String) -> Unit)? = null,
+    onMoveAudioTrack: ((String, Long) -> Unit)? = null,
     onAddAudioClick: (() -> Unit)? = null,
     onSeekTo: (Long) -> Unit
 ) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -816,62 +996,118 @@ private fun AudioTrackRow(
             }
         } else {
             audioTracks.forEach { audio ->
-            val startDp = (audio.startTimeMs / msPerDp).dp
-            val widthDp = (audio.durationMs / msPerDp).dp.coerceAtLeast(30.dp)
+                val isSelected = audio.id == selectedAudioTrackId
+                var isDragging by remember { mutableStateOf(false) }
+                var dragStartMs by remember { mutableLongStateOf(audio.startTimeMs) }
+                LaunchedEffect(audio.startTimeMs) {
+                    if (!isDragging) dragStartMs = audio.startTimeMs
+                }
+                val currentStartMs = if (isDragging) dragStartMs else audio.startTimeMs
+                val startDp = (currentStartMs / msPerDp).dp
+                val widthDp = (audio.durationMs / msPerDp).dp.coerceAtLeast(30.dp)
 
-            Box(
-                modifier = Modifier
-                    .offset(x = startDp)
-                    .width(widthDp)
-                    .height(30.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF047857))
-                    .border(0.5.dp, Color(0xFF10B981), RoundedCornerShape(4.dp))
-                    .clickable { onSeekTo(audio.startTimeMs) }
-                    .padding(horizontal = 6.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
-                        if (audio.isExtracted) {
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFF0284C7), RoundedCornerShape(2.dp))
-                                    .padding(horizontal = 3.dp, vertical = 1.dp)
-                            ) {
-                                Text("EXTRACTED", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                        } else if (!audio.uriString.isNullOrBlank()) {
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFF059669), RoundedCornerShape(2.dp))
-                                    .padding(horizontal = 3.dp, vertical = 1.dp)
-                            ) {
-                                Text("DEVICE", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
+                Box(
+                    modifier = Modifier
+                        .offset(x = startDp)
+                        .width(widthDp)
+                        .height(30.dp)
+                        .zIndex(if (isDragging) 10f else 1f)
+                        .graphicsLayer {
+                            scaleX = if (isDragging) 1.05f else 1f
+                            scaleY = if (isDragging) 1.05f else 1f
+                            shadowElevation = if (isDragging) 8f else 0f
                         }
-                        Text(
-                            text = "♪ ${audio.name}",
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isDragging) Color(0xFF059669) else if (isSelected) Color(0xFF047857) else Color(0xFF065F46))
+                        .border(
+                            width = if (isDragging || isSelected) 2.dp else 0.5.dp,
+                            color = if (isDragging) Color(0xFF6EE7B7) else if (isSelected) Color(0xFFFACC15) else Color(0xFF10B981),
+                            shape = RoundedCornerShape(4.dp)
                         )
+                        .clickable {
+                            onSelectAudioTrack?.invoke(audio.id)
+                            onSeekTo(audio.startTimeMs)
+                        }
+                        .pointerInput(audio.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    isDragging = true
+                                    dragStartMs = audio.startTimeMs
+                                    onSelectAudioTrack?.invoke(audio.id)
+                                    triggerHapticFeedback(context, haptic)
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val deltaMs = (dragAmount.x * msPerDp).toLong()
+                                    dragStartMs = (dragStartMs + deltaMs).coerceAtLeast(0L)
+                                    onMoveAudioTrack?.invoke(audio.id, dragStartMs)
+                                },
+                                onDragEnd = { isDragging = false },
+                                onDragCancel = { isDragging = false }
+                            )
+                        }
+                        .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                            if (isDragging) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF34D399), RoundedCornerShape(2.dp))
+                                        .padding(horizontal = 3.dp, vertical = 1.dp)
+                                ) {
+                                    Text("MOVE ⟷", color = Color.Black, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                            } else if (audio.isExtracted) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF0284C7), RoundedCornerShape(2.dp))
+                                        .padding(horizontal = 3.dp, vertical = 1.dp)
+                                ) {
+                                    Text("EXTRACTED", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                            } else if (!audio.uriString.isNullOrBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF059669), RoundedCornerShape(2.dp))
+                                        .padding(horizontal = 3.dp, vertical = 1.dp)
+                                ) {
+                                    Text("DEVICE", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold)
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
+                            Text(
+                                text = "♪ ${audio.name}",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1
+                            )
+                        }
+                        if (isDragging || isSelected) {
+                            Text(
+                                text = if (isDragging) String.format("@%.1fs", currentStartMs / 1000f) else "${(audio.volume * 100).toInt()}%",
+                                color = Color(0xFFFEF08A),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else {
+                            Text(
+                                text = "${(audio.volume * 100).toInt()}%",
+                                color = Color(0xFF6EE7B7),
+                                fontSize = 9.sp
+                            )
+                        }
                     }
-                    Text(
-                        text = "${(audio.volume * 100).toInt()}%",
-                        color = Color(0xFF6EE7B7),
-                        fontSize = 9.sp
-                    )
                 }
             }
-        }
 
             // "+" Button to add more audio tracks
             val maxAudioEnd = audioTracks.maxOfOrNull { it.startTimeMs + it.durationMs } ?: 0L
