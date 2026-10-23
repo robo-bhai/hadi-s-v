@@ -62,6 +62,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -559,63 +561,134 @@ private fun PlaybackBar(
 ) {
     val curFrame = (currentMs * 30 / 1000).toInt()
     val totFrames = (totalMs * 30 / 1000).toInt()
+    var showZoomSlider by remember { mutableStateOf(false) }
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF13151E))
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 10.dp, vertical = 4.dp)
     ) {
-        // Timecode & Frame Counter
-        Column {
-            Text(
-                text = "${formatTime(currentMs)} / ${formatTime(totalMs)}",
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Frame $curFrame / $totFrames @30fps",
-                color = AccentCyan,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-
-        // Center Play / Pause button
-        IconButton(onClick = onTogglePlay, modifier = Modifier.size(34.dp)) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-
-        // Timeline Zoom Controls
         Row(
-            modifier = Modifier
-                .background(Color(0xFF1E2333), RoundedCornerShape(12.dp))
-                .padding(2.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            listOf(1.0f, 1.5f, 2.0f).forEach { z ->
-                val isSel = (timelineZoom == z)
+            // Timecode & Frame Counter
+            Column {
+                Text(
+                    text = "${formatTime(currentMs)} / ${formatTime(totalMs)}",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Frame $curFrame / $totFrames @30fps",
+                    color = AccentCyan,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            // Center Play / Pause button
+            IconButton(onClick = onTogglePlay, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Timeline Zoom & Scaling Controls (Expand / Compress)
+            Row(
+                modifier = Modifier
+                    .background(Color(0xFF1E2333), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFF333B50), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Compress (-)
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isSel) AccentPurple else Color.Transparent)
-                        .clickable { onSetZoom(z) }
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .clickable { onSetZoom((timelineZoom - 0.25f).coerceIn(0.25f, 5.0f)) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("-", color = Color(0xFFE2E8F0), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // Zoom Level Badge & Slider Toggle
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF0F172A))
+                        .clickable { showZoomSlider = !showZoomSlider }
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
-                    Text(
-                        text = "${z}x",
-                        color = if (isSel) Color.White else Color(0xFF94A3B8),
-                        fontSize = 9.sp,
-                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.ZoomIn, contentDescription = "Zoom Slider", tint = Color(0xFF38BDF8), modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = String.format("%.2fx", timelineZoom),
+                            color = Color(0xFF38BDF8),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Expand (+)
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .clickable { onSetZoom((timelineZoom + 0.35f).coerceIn(0.25f, 5.0f)) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("+", color = Color(0xFFE2E8F0), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Expanded Timeline Zoom Slider Row
+        if (showZoomSlider) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Timeline Zoom:", color = Color(0xFF94A3B8), fontSize = 10.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Slider(
+                    value = timelineZoom,
+                    onValueChange = onSetZoom,
+                    valueRange = 0.25f..5.0f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFF38BDF8),
+                        activeTrackColor = Color(0xFF38BDF8)
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                listOf(0.25f to "Fit", 1.0f to "1x", 3.0f to "Frame").forEach { (z, label) ->
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 3.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (timelineZoom == z) Color(0xFF38BDF8) else Color(0xFF1E293B))
+                            .clickable { onSetZoom(z) }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (timelineZoom == z) Color.Black else Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }

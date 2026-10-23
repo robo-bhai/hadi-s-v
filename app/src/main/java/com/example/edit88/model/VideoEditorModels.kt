@@ -167,7 +167,7 @@ data class SubtitleClip(
     val customFontName: String? = null,
     val stylePreset: SubtitleStylePreset = SubtitleStylePreset.KARAOKE,
     val animationPreset: SubtitleAnimationPreset = SubtitleAnimationPreset.POP,
-    val fontSizeSp: Float = 24f,
+    val fontSizeSp: Float = 18f,
     val textColorHex: Long = 0xFFFFFFFF,
     val activeColorHex: Long = 0xFFFACC15, // Yellow highlight for karaoke
     val outlineColorHex: Long = 0xFF000000,

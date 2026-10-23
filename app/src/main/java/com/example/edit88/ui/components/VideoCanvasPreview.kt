@@ -15,15 +15,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -652,7 +656,7 @@ fun VideoCanvasPreview(
                     }
                 }
 
-                // Active Subtitle / Text Overlay with Interactive Placement & Rotation
+                // Active Subtitle / Text Overlay with Interactive Placement & 4-Corner Resizing
                 if (activeSubtitle != null) {
                     val isSubtitleSelected = (activeSubtitle.id == selectedSubtitleId)
                     var subPosX by remember(activeSubtitle.posX) { mutableFloatStateOf(activeSubtitle.posX) }
@@ -660,6 +664,7 @@ fun VideoCanvasPreview(
                     var subScale by remember(activeSubtitle.scale) { mutableFloatStateOf(activeSubtitle.scale) }
                     var subRotation by remember(activeSubtitle.rotation) { mutableFloatStateOf(activeSubtitle.rotation) }
                     var isRotating by remember { mutableStateOf(false) }
+                    var isResizing by remember { mutableStateOf(false) }
 
                     Box(
                         modifier = Modifier
@@ -675,8 +680,8 @@ fun VideoCanvasPreview(
                             .then(
                                 if (isSubtitleSelected) {
                                     Modifier
-                                        .border(1.5.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp))
-                                        .background(Color(0x33F59E0B), RoundedCornerShape(8.dp))
+                                        .border(1.5.dp, Color(0xFF38BDF8), RoundedCornerShape(8.dp))
+                                        .background(Color(0x2238BDF8), RoundedCornerShape(8.dp))
                                 } else Modifier
                             )
                             .pointerInput(activeSubtitle.id) {
@@ -706,57 +711,65 @@ fun VideoCanvasPreview(
                         )
 
                         if (isSubtitleSelected) {
-                            // 1. Delete Handle (Top-Right)
-                            Box(
+                            // Top Floating Action Bar: Edit Inspector, Scale Readout & Delete
+                            Row(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = 10.dp, y = (-10).dp)
-                                    .size(20.dp)
-                                    .background(Color(0xFFEF4444), CircleShape)
-                                    .border(1.dp, Color.White, CircleShape)
-                                    .clickable { onDeleteSubtitle?.invoke(activeSubtitle.id) },
-                                contentAlignment = Alignment.Center
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = (-36).dp)
+                                    .background(Color(0xEE0B132B), RoundedCornerShape(20.dp))
+                                    .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Delete Text",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
+                                // Edit button
+                                Row(
+                                    modifier = Modifier
+                                        .clickable { onEditSubtitle?.invoke(activeSubtitle) },
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit Subtitle", tint = Color(0xFF38BDF8), modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Edit", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // Scale percentage badge
+                                Text(
+                                    text = "${(subScale * 100).toInt()}%",
+                                    color = Color(0xFFFDE047),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold
                                 )
+
+                                // Delete button
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .background(Color(0xFFEF4444), CircleShape)
+                                        .clickable { onDeleteSubtitle?.invoke(activeSubtitle.id) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Delete", tint = Color.White, modifier = Modifier.size(11.dp))
+                                }
                             }
 
-                            // 2. Edit Text Handle (Top-Left)
+                            // 1. Top-Left Corner Resize Handle
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
-                                    .offset(x = (-10).dp, y = (-10).dp)
-                                    .size(20.dp)
-                                    .background(Color(0xFF3B82F6), CircleShape)
-                                    .border(1.dp, Color.White, CircleShape)
-                                    .clickable { onEditSubtitle?.invoke(activeSubtitle) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Edit Text",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-
-                            // 3. Scale Handle (Bottom-Right)
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .offset(x = 10.dp, y = 10.dp)
-                                    .size(20.dp)
-                                    .background(Color(0xFFF59E0B), CircleShape)
-                                    .border(1.dp, Color.White, CircleShape)
+                                    .offset(x = (-8).dp, y = (-8).dp)
+                                    .size(18.dp)
+                                    .background(Color(0xFF38BDF8), CircleShape)
+                                    .border(2.dp, Color.White, CircleShape)
                                     .pointerInput(activeSubtitle.id) {
-                                        detectDragGestures { change, dragAmount ->
+                                        detectDragGestures(
+                                            onDragStart = { isResizing = true },
+                                            onDragEnd = { isResizing = false },
+                                            onDragCancel = { isResizing = false }
+                                        ) { change, dragAmount ->
                                             change.consume()
-                                            val scaleDelta = (dragAmount.x + dragAmount.y) / 100f
-                                            subScale = (subScale + scaleDelta).coerceIn(0.5f, 3.0f)
+                                            val scaleDelta = -(dragAmount.x + dragAmount.y) / 80f
+                                            subScale = (subScale + scaleDelta).coerceIn(0.4f, 4.0f)
                                             onUpdateSubtitlePosition?.invoke(
                                                 activeSubtitle.id, subPosX, subPosY, subScale, subRotation
                                             )
@@ -764,10 +777,91 @@ fun VideoCanvasPreview(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("↔", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
                             }
 
-                            // 4. Rotation Handle (Bottom-Center stem)
+                            // 2. Top-Right Corner Resize Handle
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 8.dp, y = (-8).dp)
+                                    .size(18.dp)
+                                    .background(Color(0xFF38BDF8), CircleShape)
+                                    .border(2.dp, Color.White, CircleShape)
+                                    .pointerInput(activeSubtitle.id) {
+                                        detectDragGestures(
+                                            onDragStart = { isResizing = true },
+                                            onDragEnd = { isResizing = false },
+                                            onDragCancel = { isResizing = false }
+                                        ) { change, dragAmount ->
+                                            change.consume()
+                                            val scaleDelta = (dragAmount.x - dragAmount.y) / 80f
+                                            subScale = (subScale + scaleDelta).coerceIn(0.4f, 4.0f)
+                                            onUpdateSubtitlePosition?.invoke(
+                                                activeSubtitle.id, subPosX, subPosY, subScale, subRotation
+                                            )
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
+                            }
+
+                            // 3. Bottom-Left Corner Resize Handle
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .offset(x = (-8).dp, y = 8.dp)
+                                    .size(18.dp)
+                                    .background(Color(0xFF38BDF8), CircleShape)
+                                    .border(2.dp, Color.White, CircleShape)
+                                    .pointerInput(activeSubtitle.id) {
+                                        detectDragGestures(
+                                            onDragStart = { isResizing = true },
+                                            onDragEnd = { isResizing = false },
+                                            onDragCancel = { isResizing = false }
+                                        ) { change, dragAmount ->
+                                            change.consume()
+                                            val scaleDelta = -(dragAmount.x - dragAmount.y) / 80f
+                                            subScale = (subScale + scaleDelta).coerceIn(0.4f, 4.0f)
+                                            onUpdateSubtitlePosition?.invoke(
+                                                activeSubtitle.id, subPosX, subPosY, subScale, subRotation
+                                            )
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
+                            }
+
+                            // 4. Bottom-Right Corner Resize Handle
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .offset(x = 8.dp, y = 8.dp)
+                                    .size(18.dp)
+                                    .background(Color(0xFF38BDF8), CircleShape)
+                                    .border(2.dp, Color.White, CircleShape)
+                                    .pointerInput(activeSubtitle.id) {
+                                        detectDragGestures(
+                                            onDragStart = { isResizing = true },
+                                            onDragEnd = { isResizing = false },
+                                            onDragCancel = { isResizing = false }
+                                        ) { change, dragAmount ->
+                                            change.consume()
+                                            val scaleDelta = (dragAmount.x + dragAmount.y) / 80f
+                                            subScale = (subScale + scaleDelta).coerceIn(0.4f, 4.0f)
+                                            onUpdateSubtitlePosition?.invoke(
+                                                activeSubtitle.id, subPosX, subPosY, subScale, subRotation
+                                            )
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
+                            }
+
+                            // 5. Rotation Handle (Bottom-Center stem)
                             Column(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
@@ -776,9 +870,9 @@ fun VideoCanvasPreview(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(24.dp)
-                                        .background(Color(0xFF06B6D4), CircleShape)
-                                        .border(1.dp, Color.White, CircleShape)
+                                        .size(22.dp)
+                                        .background(Color(0xFF8B5CF6), CircleShape)
+                                        .border(1.5.dp, Color.White, CircleShape)
                                         .pointerInput(activeSubtitle.id) {
                                             detectDragGestures(
                                                 onDragStart = { isRotating = true },
@@ -800,7 +894,7 @@ fun VideoCanvasPreview(
                                         imageVector = Icons.AutoMirrored.Filled.RotateRight,
                                         contentDescription = "Rotate Text",
                                         tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
                                 }
 
@@ -813,7 +907,7 @@ fun VideoCanvasPreview(
                                     ) {
                                         Text(
                                             text = "${subRotation.roundToInt()}°",
-                                            color = Color(0xFF67E8F9),
+                                            color = Color(0xFFC084FC),
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold
                                         )

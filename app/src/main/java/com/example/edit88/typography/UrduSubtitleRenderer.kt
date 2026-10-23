@@ -10,10 +10,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -206,16 +207,16 @@ private fun KaraokeSubtitleView(
     }
 
     if (clip.words.isNotEmpty()) {
-        FlowRow(
+        Row(
             modifier = Modifier
-                .widthIn(max = 540.dp)
-                .background(backgroundColor, RoundedCornerShape(12.dp))
-                .border(clip.outlineWidthDp.dp, outlineBorderColor, RoundedCornerShape(12.dp))
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .wrapContentWidth()
+                .background(backgroundColor, RoundedCornerShape(10.dp))
+                .border(clip.outlineWidthDp.dp, outlineBorderColor, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = arrangement,
-            verticalArrangement = Arrangement.Center
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            clip.words.forEachIndexed { idx, timedWord ->
+            for (timedWord in clip.words) {
                 // Typewriter support: only show words if elapsed time has reached their offset
                 val isVisibleForTypewriter = if (clip.animationPreset == SubtitleAnimationPreset.TYPEWRITER) {
                     currentPlayheadMs >= timedWord.startOffsetMs
@@ -227,7 +228,7 @@ private fun KaraokeSubtitleView(
 
                     val wordScale by animateFloatAsState(
                         targetValue = if (isActive) {
-                            if (isKaraokeBounce) 1.25f else 1.15f
+                            if (isKaraokeBounce) 1.22f else 1.12f
                         } else 1.0f,
                         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
                         label = "wordScale"
@@ -254,6 +255,8 @@ private fun KaraokeSubtitleView(
                         lineHeight = lineHeightVal,
                         fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
                         color = wordColor,
+                        maxLines = 1,
+                        softWrap = false,
                         textAlign = textAlign,
                         style = TextStyle(
                             platformStyle = PlatformTextStyle(includeFontPadding = true),
@@ -267,7 +270,7 @@ private fun KaraokeSubtitleView(
             }
         }
     } else {
-        // Fallback when no words breakdown
+        // Fallback when no words breakdown - Movie-style horizontal subtitle
         val glowShadow = if (clip.glowRadius > 0f) {
             Shadow(color = Color(clip.glowColorHex), offset = Offset.Zero, blurRadius = clip.glowRadius)
         } else {
@@ -282,12 +285,14 @@ private fun KaraokeSubtitleView(
             fontWeight = FontWeight.Bold,
             color = Color(clip.textColorHex),
             textAlign = textAlign,
+            maxLines = 1,
+            softWrap = false,
             style = TextStyle(
                 platformStyle = PlatformTextStyle(includeFontPadding = true),
                 shadow = glowShadow
             ),
             modifier = Modifier
-                .widthIn(max = 540.dp)
+                .wrapContentWidth()
                 .background(backgroundColor, RoundedCornerShape(10.dp))
                 .border(clip.outlineWidthDp.dp, outlineBorderColor, RoundedCornerShape(10.dp))
                 .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -326,6 +331,8 @@ private fun NeonGlowSubtitleView(
             fontWeight = FontWeight.Bold,
             color = Color(clip.textColorHex),
             textAlign = textAlign,
+            maxLines = 1,
+            softWrap = false,
             style = TextStyle(
                 platformStyle = PlatformTextStyle(includeFontPadding = true),
                 shadow = Shadow(
@@ -354,7 +361,7 @@ private fun BoxedSubtitleView(
 
     Box(
         modifier = Modifier
-            .widthIn(max = 540.dp)
+            .wrapContentWidth()
             .shadow(clip.shadowBlurRadius.dp, RoundedCornerShape(8.dp))
             .background(Color(clip.bgColorHex).copy(alpha = clip.bgOpacity), RoundedCornerShape(8.dp))
             .border(clip.outlineWidthDp.dp, Color(clip.outlineColorHex), RoundedCornerShape(8.dp))
@@ -369,6 +376,8 @@ private fun BoxedSubtitleView(
             fontWeight = FontWeight.SemiBold,
             color = Color(clip.textColorHex),
             textAlign = textAlign,
+            maxLines = 1,
+            softWrap = false,
             style = TextStyle(
                 platformStyle = PlatformTextStyle(includeFontPadding = true)
             )
@@ -398,6 +407,8 @@ private fun RetroStrokeSubtitleView(
         fontWeight = FontWeight.ExtraBold,
         color = Color(clip.textColorHex),
         textAlign = textAlign,
+        maxLines = 1,
+        softWrap = false,
         style = TextStyle(
             platformStyle = PlatformTextStyle(includeFontPadding = true),
             shadow = Shadow(
@@ -407,7 +418,7 @@ private fun RetroStrokeSubtitleView(
             )
         ),
         modifier = Modifier
-            .widthIn(max = 540.dp)
+            .wrapContentWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
     )
 }
@@ -434,6 +445,8 @@ private fun MinimalSubtitleView(
         fontWeight = FontWeight.Normal,
         color = Color(clip.textColorHex),
         textAlign = textAlign,
+        maxLines = 1,
+        softWrap = false,
         style = TextStyle(
             platformStyle = PlatformTextStyle(includeFontPadding = true),
             shadow = Shadow(
@@ -443,7 +456,7 @@ private fun MinimalSubtitleView(
             )
         ),
         modifier = Modifier
-            .widthIn(max = 540.dp)
+            .wrapContentWidth()
             .padding(horizontal = 6.dp, vertical = 2.dp)
     )
 }

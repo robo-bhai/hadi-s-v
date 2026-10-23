@@ -98,6 +98,39 @@ ffmpeg -y \
     [0:v]setpts=1.0*PTS,\
     eq=brightness=0.04:contrast=1.25:saturation=1.20,\
     ass=subtitles_urdu_nastaliq.ass[v_out];\
+    [1:a]volume=0.85[a_out]\" \
+  -map \"[v_out]\" -map \"[a_out]\" -c:v libx264 -pix_fmt yuv420p -c:a aac output.mp4
+```
+
+---
+
+## 7. Interactive Subtitle Layout & Video Timeline Features (Latest Enhancements)
+
+1. **Strict Horizontal Single-Line Auto-Layout (Movie Subtitle Aesthetics)**:
+   - All subtitle templates (`Karaoke`, `Neon Glow`, `Boxed`, `Retro Stroke`, `Minimal`) are forced to a single horizontal row (`maxLines = 1`, `softWrap = false`) with `wrapContentWidth()`.
+   - Dynamic 3-4 word chunks ensure rapid readability and audio synchronization without vertical text wrapping.
+   - Defaults to the standard lower-third safe zone (`posY = 0.82f`) with proportionate movie-style sizing (`18sp` scaled).
+
+2. **4-Corner Interactive Resizing Bounding Box**:
+   - Corner handles on Top-Left, Top-Right, Bottom-Left, and Bottom-Right with diagonal scale drag physics.
+   - Center drag freely repositions subtitles across the entire canvas area.
+   - Rotation stem handle (`↺`) with live angle readout.
+   - Live scale readout badge (`100%`, `125%`, etc.) and top floating action bar (`Edit Inspector` and `Delete`).
+
+3. **Multi-Touch Timeline Zoom & Precision Editing**:
+   - Two-finger pinch-to-zoom gesture on the multi-track timeline and time ruler.
+   - Expand & compress UI toolbar with `[-]` / `[+]` buttons, live zoom chip (`1.0x`), and an expandable slider ranging from `0.25x` (full video overview) to `5.0x` (frame-by-frame precision).
+   - Instant presets: `Fit` (0.5x), `1x` (1.0x), `Frame` (3.0x).
+
+4. **Dedicated Font Store & Asset Library Window**:
+   - Browse, search, and preview pre-packaged and downloadable typography styles.
+   - "Download Font" integration for instant in-app fetching.
+   - "Add / Upload Custom Font" supporting `.ttf` and `.otf` local font files.
+
+5. **Core Video Editing Tools & Real-Time Performance**:
+   - 0.1x to 10.0x playback speed adjustment with pitch preservation.
+   - Comprehensive color grading: Brightness, Contrast, Saturation, Temperature, Tint, Highlights, Shadows, and LUT Presets.
+   - Hardware-accelerated real-time Compose Canvas preview.
     [1:a]volume=0.85,afade=t=in:ss=0:d=1,afade=t=out:st=13:d=1[a_out]" \
   -map "[v_out]" -map "[a_out]" \
   -c:v libx264 -preset fast -b:v 16M \

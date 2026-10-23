@@ -227,7 +227,7 @@ fun MultiTrackTimeline(
                 modifier = Modifier.padding(end = 8.dp)
             ) {
                 Text(
-                    text = String.format("%.1fx", timelineZoom),
+                    text = String.format("%.2fx", timelineZoom),
                     color = Color(0xFF38BDF8),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
@@ -237,27 +237,27 @@ fun MultiTrackTimeline(
                     modifier = Modifier
                         .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
                         .clickable { onZoomChange?.invoke((timelineZoom - 0.25f).coerceIn(0.25f, 5.0f)) }
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {
-                    Text("-", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("-", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(2.dp))
                 Box(
                     modifier = Modifier
-                        .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
+                        .background(if (timelineZoom == 1.0f) Color(0xFF38BDF8) else Color(0xFF1E293B), RoundedCornerShape(4.dp))
                         .clickable { onZoomChange?.invoke(1.0f) }
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                        .padding(horizontal = 5.dp, vertical = 3.dp)
                 ) {
-                    Text("1x", color = Color(0xFF94A3B8), fontSize = 9.sp)
+                    Text("1x", color = if (timelineZoom == 1.0f) Color.Black else Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(2.dp))
                 Box(
                     modifier = Modifier
                         .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
                         .clickable { onZoomChange?.invoke((timelineZoom + 0.35f).coerceIn(0.25f, 5.0f)) }
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {
-                    Text("+", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("+", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -285,12 +285,20 @@ fun MultiTrackTimeline(
                     TrackIconItem(icon = Icons.Default.Audiotrack, color = TrackAudioColor, label = "Audio", onAddClick = onAddAudioClick)
                 }
 
-                // Scrollable Tracks Area
+                // Scrollable Tracks Area with Multi-Touch Pinch-to-Zoom
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
                         .horizontalScroll(scrollState)
+                        .pointerInput(timelineZoom) {
+                            detectTransformGestures(panZoomLock = false) { _, _, zoom, _ ->
+                                if (zoom != 1f) {
+                                    val newZoom = (timelineZoom * zoom).coerceIn(0.25f, 5.0f)
+                                    onZoomChange?.invoke(newZoom)
+                                }
+                            }
+                        }
                         .pointerInput(totalDurationMs) {
                             detectDragGestures { change, _ ->
                                 change.consume()
