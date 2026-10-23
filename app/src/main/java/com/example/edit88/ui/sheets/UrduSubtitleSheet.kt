@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.FormatPaint
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -68,9 +69,11 @@ import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.AccentCyan
 import com.example.ui.theme.AccentPink
 import com.example.ui.theme.AccentPurple
+import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkSurfaceVariant
 import com.example.ui.theme.GulzarFontFamily
+import com.example.ui.theme.LateefFontFamily
 import com.example.ui.theme.NotoNastaliqUrduFontFamily
 
 @Composable
@@ -78,6 +81,8 @@ fun UrduSubtitleSheet(
     project: Project,
     currentPlayheadMs: Long,
     selectedSubtitleId: String? = null,
+    isGeneratingSubtitles: Boolean = false,
+    subtitleGenerationStatus: String? = null,
     onAddSubtitle: (SubtitleClip) -> Unit,
     onUpdateSubtitle: (SubtitleClip) -> Unit,
     onDeleteSubtitle: (String) -> Unit,
@@ -265,6 +270,8 @@ fun UrduSubtitleSheet(
                 val previewFont = when (selectedFont) {
                     UrduFontChoice.NOTO_NASTALIQ -> NotoNastaliqUrduFontFamily
                     UrduFontChoice.GULZAR -> GulzarFontFamily
+                    UrduFontChoice.AMIRI -> AmiriFontFamily
+                    UrduFontChoice.LATEEF -> LateefFontFamily
                     UrduFontChoice.SYSTEM_SANS -> FontFamily.Default
                     UrduFontChoice.SERIF -> FontFamily.Serif
                     UrduFontChoice.IMPACT -> FontFamily.SansSerif
@@ -528,13 +535,13 @@ fun UrduSubtitleSheet(
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = "Manual Subtitle Generation",
+                            text = "AI Audio Subtitle Generation",
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Generate synchronized auto-subtitles across your timeline",
+                            text = "Transcribe real video audio & generate Urdu Nastaliq subtitles with Gemini AI",
                             color = Color(0xFF94A3B8),
                             fontSize = 11.sp
                         )
@@ -543,8 +550,30 @@ fun UrduSubtitleSheet(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Font Status Banner
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0F291E), RoundedCornerShape(8.dp))
+                        .border(1.dp, Color(0xFF10B981).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("✓", color = Color(0xFF34D399), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "4 Urdu Nastaliq Fonts Ready: Noto Nastaliq, Gulzar, Amiri, Lateef",
+                            color = Color(0xFFD1FAE5),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Text(
-                    text = "Project contains ${project.clips.size} clips (Total: ${project.totalDurationMs / 1000}s). Tap below to generate auto-synced Urdu Nastaliq captions timed to the beats and scene transitions.",
+                    text = "Project contains ${project.clips.size} clips & ${project.audioTracks.size} audio tracks (${project.totalDurationMs / 1000}s). Tap below to transcribe real audio and generate synchronized karaoke subtitles using Gemini 3.5 Flash.",
                     color = Color(0xFFCBD5E1),
                     fontSize = 12.sp,
                     lineHeight = 18.sp
@@ -552,27 +581,53 @@ fun UrduSubtitleSheet(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Big Manual Trigger Button
-                Button(
-                    onClick = {
-                        onGenerateSubtitles()
-                        generatedNotice = true
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "✨ Generate Subtitles Now",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (isGeneratingSubtitles) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0C4A6E), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(10.dp))
+                            .padding(14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color(0xFF38BDF8),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = subtitleGenerationStatus ?: "🎙️ Transcribing audio with Gemini 3.5 Flash...",
+                                color = Color(0xFFE0F2FE),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                } else {
+                    // Big Trigger Button
+                    Button(
+                        onClick = {
+                            onGenerateSubtitles()
+                            generatedNotice = true
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "✨ Generate Real Subtitles with Gemini",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
-                if (generatedNotice) {
+                if (generatedNotice && !isGeneratingSubtitles) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Box(
                         modifier = Modifier
@@ -581,7 +636,7 @@ fun UrduSubtitleSheet(
                             .padding(10.dp)
                     ) {
                         Text(
-                            text = "✓ Subtitles generated successfully and placed on timeline! You can drag, resize, rotate, or trim them on canvas.",
+                            text = subtitleGenerationStatus ?: "✓ Subtitles generated successfully and placed on timeline! You can drag, resize, rotate, or trim them on canvas.",
                             color = Color(0xFFD1FAE5),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold

@@ -22,6 +22,7 @@ import com.example.edit88.model.TimedWord
 import com.example.edit88.model.TransitionType
 import com.example.edit88.model.UrduFontChoice
 import com.example.edit88.model.VideoTemplate
+import com.example.edit88.typography.UrduFontManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,7 +62,9 @@ data class EditorUiState(
     val recentProjects: List<Project> = emptyList(),
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
-    val timelineZoom: Float = 1.0f
+    val timelineZoom: Float = 1.0f,
+    val isGeneratingSubtitles: Boolean = false,
+    val subtitleGenerationStatus: String? = null
 ) {
     val hasSelection: Boolean
         get() = selectedClipId != null || selectedSubtitleId != null || selectedOverlayId != null || selectedAudioTrackId != null
@@ -79,6 +82,7 @@ data class EditorUiState(
 class VideoEditorViewModel(application: Application) : AndroidViewModel(application) {
     val settingsRepository = SettingsRepository(application)
     val geminiService = GeminiService()
+    val urduFontManager = UrduFontManager(application)
 
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
@@ -608,50 +612,37 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
 
     fun generateSubtitlesForProject() {
         pushHistory()
-        val project = _uiState.value.project
-        val totalMs = project.totalDurationMs
-        val sampleUrduSentences = listOf(
-            "ہر مشکل کے بعد آسانی ہے",
-            "اپنے خوابوں پر یقین رکھیں اور محنت کریں",
-            "کامیابی صرف ایک قدم دور ہے",
-            "وقت کی قدر کریں اور آگے بڑھیں",
-            "یہ سفر آپ کی محنت سے خوبصورت ہے"
-        )
-        val stepMs = 4000L
-        val count = ((totalMs / stepMs).toInt() + 1).coerceAtLeast(1)
-        val generated = mutableListOf<SubtitleClip>()
-
-        for (i in 0 until minOf(count, 5)) {
-            val sStart = i * stepMs
-            val sEnd = minOf(sStart + 3500L, totalMs)
-            if (sStart >= totalMs) break
-            val line = sampleUrduSentences[i % sampleUrduSentences.size]
-            val words = line.split(" ")
-            val wordStep = (sEnd - sStart) / maxOf(1, words.size)
-            val timedWords = words.mapIndexed { wIdx, w ->
-                TimedWord(w, sStart + (wIdx * wordStep), sStart + ((wIdx + 1) * wordStep))
-            }
-            generated.add(
-                SubtitleClip(
-                    text = line,
-                    startMs = sStart,
-                    endMs = sEnd,
-                    fontChoice = UrduFontChoice.NOTO_NASTALIQ,
-                    stylePreset = SubtitleStylePreset.KARAOKE,
-                    fontSizeSp = 22f,
-                    isRtl = true,
-                    words = timedWords,
-                    posX = 0.5f,
-                    posY = 0.8f
-                )
-            )
-        }
-
         _uiState.update {
             it.copy(
-                project = it.project.copy(subtitles = generated, updatedAt = System.currentTimeMillis()),
-                selectedSubtitleId = generated.firstOrNull()?.id
+                isGeneratingSubtitles = true,
+                subtitleGenerationStatus = "🎙️ Real video audio analyze ki ja rahi he aur Gemini AI se Urdu subtitles generate ho rahe hain..."
             )
+        }
+        viewModelScope.launch {
+            try {
+                val apiKey = settingsRepository.getApiKey()
+                val currentProject = _uiState.value.project
+                val generated = geminiService.generateRealAudioSubtitles(
+                    project = currentProject,
+                    apiKey = apiKey,
+                    context = getApplication()
+                )
+                _uiState.update {
+                    it.copy(
+                        project = it.project.copy(subtitles = generated, updatedAt = System.currentTimeMillis()),
+                        selectedSubtitleId = generated.firstOrNull()?.id,
+                        isGeneratingSubtitles = false,
+                        subtitleGenerationStatus = "✓ Real audio subtitles kamyabi se timeline pr add ho gae!"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isGeneratingSubtitles = false,
+                        subtitleGenerationStatus = "Error: ${e.localizedMessage ?: "Failed to generate subtitles"}"
+                    )
+                }
+            }
         }
     }
 

@@ -122,6 +122,8 @@ data class AudioTrack(
 enum class UrduFontChoice(val label: String) {
     NOTO_NASTALIQ("Noto Nastaliq (اردو)"),
     GULZAR("Gulzar Nastaliq (گلزار)"),
+    AMIRI("Amiri Nastaliq (امیری)"),
+    LATEEF("Lateef Nastaliq (لطیف)"),
     SYSTEM_SANS("Modern Sans"),
     SERIF("Classic Serif"),
     IMPACT("Bold Impact"),

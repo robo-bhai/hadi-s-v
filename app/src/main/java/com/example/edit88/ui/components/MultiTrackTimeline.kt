@@ -67,13 +67,22 @@ import com.example.edit88.model.MediaClip
 import com.example.edit88.model.OverlayClip
 import com.example.edit88.model.Project
 import com.example.edit88.model.SubtitleClip
+import com.example.edit88.model.UrduFontChoice
+import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkSurfaceVariant
+import com.example.ui.theme.GulzarFontFamily
+import com.example.ui.theme.LateefFontFamily
+import com.example.ui.theme.NotoNastaliqUrduFontFamily
 import com.example.ui.theme.PlayheadColor
 import com.example.ui.theme.TrackAudioColor
 import com.example.ui.theme.TrackOverlayColor
 import com.example.ui.theme.TrackSubtitleColor
 import com.example.ui.theme.TrackVideoColor
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 
 import com.example.edit88.model.TransitionType
 
@@ -800,12 +809,12 @@ private fun SubtitleTrackRow(
                 }
                 Box(
                     modifier = Modifier
-                        .background(Color(0xFF0284C7).copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                        .background(Color(0xFF0284C7).copy(alpha = 0.35f), RoundedCornerShape(4.dp))
                         .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(4.dp))
                         .clickable { onGenerateSubtitlesClick?.invoke() }
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Text("✨ Generate Subtitles", color = Color(0xFFBAE6FD), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("✨ AI Audio Subtitles (Gemini)", color = Color(0xFFBAE6FD), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         } else {
@@ -820,6 +829,17 @@ private fun SubtitleTrackRow(
                 val durMs = (sub.endMs - sub.startMs).coerceAtLeast(300L)
                 val startDp = (currentStartMs / msPerDp).dp
                 val widthDp = (durMs / msPerDp).dp.coerceAtLeast(36.dp)
+
+                val subFont = when (sub.fontChoice) {
+                    UrduFontChoice.NOTO_NASTALIQ -> NotoNastaliqUrduFontFamily
+                    UrduFontChoice.GULZAR -> GulzarFontFamily
+                    UrduFontChoice.AMIRI -> AmiriFontFamily
+                    UrduFontChoice.LATEEF -> LateefFontFamily
+                    UrduFontChoice.SYSTEM_SANS -> FontFamily.Default
+                    UrduFontChoice.SERIF -> FontFamily.Serif
+                    UrduFontChoice.IMPACT -> FontFamily.SansSerif
+                    UrduFontChoice.CURSIVE -> FontFamily.Cursive
+                }
 
                 Box(
                     modifier = Modifier
@@ -900,9 +920,15 @@ private fun SubtitleTrackRow(
                             Text(
                                 text = if (isDragging) "⟷ ${sub.text}" else sub.text,
                                 color = Color.White,
-                                fontSize = 10.sp,
+                                fontFamily = subFont,
+                                fontSize = if (sub.isRtl) 10.5.sp else 10.sp,
+                                lineHeight = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = TextStyle(
+                                    platformStyle = PlatformTextStyle(includeFontPadding = true)
+                                )
                             )
                             if (isSelected || isDragging) {
                                 val durSec = durMs / 1000f

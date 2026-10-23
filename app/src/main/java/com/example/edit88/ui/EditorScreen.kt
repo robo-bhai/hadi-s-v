@@ -57,6 +57,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -192,6 +193,32 @@ fun EditorScreen(
                         viewModel.openSheet(SheetType.SUBTITLES)
                     }
                 )
+
+                if (uiState.isGeneratingSubtitles) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 12.dp)
+                            .background(Color(0xEE0B132B), RoundedCornerShape(20.dp))
+                            .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color(0xFF38BDF8),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "🎙️ Gemini AI audio transcribe kr raha he...",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
             }
 
             // 2. Playback Control Bar, Live Frame Counter & Zoom
@@ -272,6 +299,8 @@ fun EditorScreen(
                     project = project,
                     currentPlayheadMs = uiState.currentPlayheadMs,
                     selectedSubtitleId = uiState.selectedSubtitleId,
+                    isGeneratingSubtitles = uiState.isGeneratingSubtitles,
+                    subtitleGenerationStatus = uiState.subtitleGenerationStatus,
                     onAddSubtitle = { viewModel.addSubtitle(it) },
                     onUpdateSubtitle = { viewModel.updateSubtitle(it) },
                     onDeleteSubtitle = { viewModel.deleteSubtitle(it) },

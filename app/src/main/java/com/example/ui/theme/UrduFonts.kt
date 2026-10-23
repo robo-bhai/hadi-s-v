@@ -13,3 +13,11 @@ val NotoNastaliqUrduFontFamily = FontFamily(
 val GulzarFontFamily = FontFamily(
     Font(R.font.gulzar, FontWeight.Normal)
 )
+
+val AmiriFontFamily = FontFamily(
+    Font(R.font.amiri, FontWeight.Normal)
+)
+
+val LateefFontFamily = FontFamily(
+    Font(R.font.lateef, FontWeight.Normal)
+)
