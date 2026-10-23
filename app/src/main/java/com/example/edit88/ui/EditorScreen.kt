@@ -88,6 +88,8 @@ import com.example.edit88.ui.sheets.AiStudioSheet
 import com.example.edit88.ui.sheets.AudioEffectsSheet
 import com.example.edit88.ui.sheets.ColorAndFiltersSheet
 import com.example.edit88.ui.sheets.ExportDialog
+import com.example.edit88.model.UrduFontChoice
+import com.example.edit88.ui.sheets.FontStoreSheet
 import com.example.edit88.ui.sheets.SettingsSheet
 import com.example.edit88.ui.sheets.UrduSubtitleSheet
 import com.example.edit88.viewmodel.SheetType
@@ -261,9 +263,14 @@ fun EditorScreen(
                 selectedSubtitleId = uiState.selectedSubtitleId,
                 selectedOverlayId = uiState.selectedOverlayId,
                 timelineZoom = uiState.timelineZoom,
+                onZoomChange = { viewModel.setTimelineZoom(it) },
                 onSelectClip = { viewModel.selectClip(it) },
                 onSelectAudioTrack = { viewModel.selectAudioTrack(it) },
                 onSelectSubtitle = { viewModel.selectSubtitle(it) },
+                onEditSubtitle = {
+                    viewModel.selectSubtitle(it.id)
+                    viewModel.openSheet(SheetType.SUBTITLES)
+                },
                 onSelectOverlay = { viewModel.selectOverlay(it) },
                 onReorderClips = { from, to -> viewModel.reorderClips(from, to) },
                 onMoveAudioTrack = { id, start -> viewModel.moveAudioTrack(id, start) },
@@ -305,8 +312,20 @@ fun EditorScreen(
                     onUpdateSubtitle = { viewModel.updateSubtitle(it) },
                     onDeleteSubtitle = { viewModel.deleteSubtitle(it) },
                     onGenerateSubtitles = { viewModel.generateSubtitlesForProject() },
+                    onOpenFontStore = { viewModel.openSheet(SheetType.FONT_STORE) },
                     onClose = { viewModel.closeSheet() }
                 )
+                SheetType.FONT_STORE -> {
+                    val activeSub = project.subtitles.firstOrNull { it.id == uiState.selectedSubtitleId }
+                    FontStoreSheet(
+                        fontManager = viewModel.urduFontManager,
+                        selectedFontChoice = activeSub?.fontChoice ?: UrduFontChoice.NOTO_NASTALIQ,
+                        onSelectFont = { choice, customPath ->
+                            viewModel.setSubtitleFont(choice, customPath)
+                        },
+                        onClose = { viewModel.closeSheet() }
+                    )
+                }
                 SheetType.AI_STUDIO -> AiStudioSheet(
                     project = project,
                     settingsRepository = viewModel.settingsRepository,

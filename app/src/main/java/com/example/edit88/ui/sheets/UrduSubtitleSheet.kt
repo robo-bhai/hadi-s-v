@@ -3,7 +3,6 @@ package com.example.edit88.ui.sheets
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +20,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FontDownload
+import androidx.compose.material.icons.filled.FormatAlignCenter
+import androidx.compose.material.icons.filled.FormatAlignLeft
+import androidx.compose.material.icons.filled.FormatAlignRight
 import androidx.compose.material.icons.filled.FormatPaint
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.Button
@@ -53,7 +56,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +63,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.edit88.model.Project
+import com.example.edit88.model.SubtitleAnimationPreset
 import com.example.edit88.model.SubtitleClip
 import com.example.edit88.model.SubtitleStylePreset
 import com.example.edit88.model.TimedWord
@@ -87,6 +90,7 @@ fun UrduSubtitleSheet(
     onUpdateSubtitle: (SubtitleClip) -> Unit,
     onDeleteSubtitle: (String) -> Unit,
     onGenerateSubtitles: () -> Unit,
+    onOpenFontStore: () -> Unit = {},
     onClose: () -> Unit
 ) {
     val existingClip = project.subtitles.firstOrNull { it.id == selectedSubtitleId }
@@ -102,8 +106,38 @@ fun UrduSubtitleSheet(
     var selectedPreset by remember(existingClip) {
         mutableStateOf(existingClip?.stylePreset ?: SubtitleStylePreset.KARAOKE)
     }
+    var selectedAnimation by remember(existingClip) {
+        mutableStateOf(existingClip?.animationPreset ?: SubtitleAnimationPreset.POP)
+    }
     var selectedColorHex by remember(existingClip) {
         mutableLongStateOf(existingClip?.textColorHex ?: 0xFFFFFFFF)
+    }
+    var activeColorHex by remember(existingClip) {
+        mutableLongStateOf(existingClip?.activeColorHex ?: 0xFFFACC15)
+    }
+    var bgColorHex by remember(existingClip) {
+        mutableLongStateOf(existingClip?.bgColorHex ?: 0xAA000000)
+    }
+    var bgOpacity by remember(existingClip) {
+        mutableFloatStateOf(existingClip?.bgOpacity ?: 0.75f)
+    }
+    var outlineWidthDp by remember(existingClip) {
+        mutableFloatStateOf(existingClip?.outlineWidthDp ?: 2.0f)
+    }
+    var outlineColorHex by remember(existingClip) {
+        mutableLongStateOf(existingClip?.outlineColorHex ?: 0xFF000000)
+    }
+    var shadowBlurRadius by remember(existingClip) {
+        mutableFloatStateOf(existingClip?.shadowBlurRadius ?: 8.0f)
+    }
+    var glowRadius by remember(existingClip) {
+        mutableFloatStateOf(existingClip?.glowRadius ?: 0f)
+    }
+    var glowColorHex by remember(existingClip) {
+        mutableLongStateOf(existingClip?.glowColorHex ?: 0xFF06B6D4)
+    }
+    var textAlign by remember(existingClip) {
+        mutableStateOf(existingClip?.textAlign ?: "CENTER")
     }
     var fontSizeSp by remember(existingClip) {
         mutableFloatStateOf(existingClip?.fontSizeSp ?: 24f)
@@ -114,7 +148,7 @@ fun UrduSubtitleSheet(
     var durationSec by remember(existingClip) {
         mutableFloatStateOf(
             if (existingClip != null) ((existingClip.endMs - existingClip.startMs) / 1000f).coerceIn(1f, 15f)
-            else 3.5f
+            else 3.0f
         )
     }
     var generatedNotice by remember { mutableStateOf(false) }
@@ -128,17 +162,15 @@ fun UrduSubtitleSheet(
         Pair("Amber", 0xFFF59E0B),
         Pair("Purple", 0xFF8B5CF6),
         Pair("Red", 0xFFEF4444),
-        Pair("Orange", 0xFFF97316),
         Pair("Dark", 0xFF1E293B)
     )
 
     val quickUrduPresets = listOf(
-        "نیا عنوان شامل کریں",
-        "خوابوں کو حقیقت بنانے کے لیے",
-        "وقت سب سے قیمتی سرمایہ ہے",
-        "کامیابی کا راز مستقل مزاجی ہے",
-        "ہر دن ایک نئی امید لاتا ہے",
-        "خود پر بھروسہ رکھیں اور آگے بڑھیں"
+        "خوابوں کو حقیقت بنائیں",
+        "وقت سب سے قیمتی ہے",
+        "کامیابی کا اصل راز",
+        "آج ہی شروعات کریں",
+        "محنت کبھی رائیگاں نہیں جاتی"
     )
 
     Column(
@@ -148,7 +180,7 @@ fun UrduSubtitleSheet(
             .padding(horizontal = 20.dp, vertical = 16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        // Handle bar
+        // Drag Handle
         Box(
             modifier = Modifier
                 .size(40.dp, 4.dp)
@@ -173,7 +205,7 @@ fun UrduSubtitleSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (existingClip != null) "Edit Text Overlay" else "Text & Subtitle Studio",
+                    text = if (existingClip != null) "Edit Subtitle Inspector" else "Subtitle & Captions Studio",
                     color = Color.White,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
@@ -196,7 +228,7 @@ fun UrduSubtitleSheet(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Tabs: [Custom Text, Manual Auto-Subtitles]
+        // Tabs: [Inspector/Style, AI Auto-Subtitles]
         TabRow(
             selectedTabIndex = selectedTab,
             containerColor = DarkSurfaceVariant,
@@ -211,36 +243,39 @@ fun UrduSubtitleSheet(
             Tab(
                 selected = selectedTab == 0,
                 onClick = { selectedTab = 0 },
-                text = { Text("✍ Text Overlay", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                text = { Text("✍ Subtitle Inspector", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             )
             Tab(
                 selected = selectedTab == 1,
                 onClick = { selectedTab = 1 },
-                text = { Text("✨ Generate Subtitles", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                text = { Text("✨ AI Auto-Subtitles", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         if (selectedTab == 0) {
-            // ================= TAB 0: TEXT OVERLAY EDITING =================
-            // Text Input
+            // SUBTITLE INSPECTOR / STYLING TAB
+            Text("Subtitle Text (3-4 words recommended):", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
             OutlinedTextField(
                 value = subtitleText,
                 onValueChange = { subtitleText = it },
-                label = { Text("Text / Caption (Urdu, English, etc.)", color = Color(0xFF94A3B8)) },
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AccentAmber,
-                    unfocusedBorderColor = Color(0xFF334155),
+                    focusedContainerColor = DarkSurfaceVariant,
+                    unfocusedContainerColor = DarkSurfaceVariant,
                     focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                )
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = AccentAmber,
+                    unfocusedBorderColor = Color(0xFF333B50)
+                ),
+                shape = RoundedCornerShape(10.dp)
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Quick Preset Suggestions
+            // Quick Viral Urdu Presets
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(quickUrduPresets) { line ->
                     Box(
@@ -257,12 +292,12 @@ fun UrduSubtitleSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Live Preview Card
+            // Live Inspector Preview Card
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(80.dp)
-                    .background(Color(0xFF0F111A), RoundedCornerShape(10.dp))
+                    .height(85.dp)
+                    .background(Color(0xFF0B0E17), RoundedCornerShape(10.dp))
                     .border(1.dp, Color(0xFF262C3E), RoundedCornerShape(10.dp))
                     .padding(8.dp),
                 contentAlignment = Alignment.Center
@@ -276,21 +311,50 @@ fun UrduSubtitleSheet(
                     UrduFontChoice.SERIF -> FontFamily.Serif
                     UrduFontChoice.IMPACT -> FontFamily.SansSerif
                     UrduFontChoice.CURSIVE -> FontFamily.Cursive
+                    UrduFontChoice.CUSTOM_IMPORTED -> NotoNastaliqUrduFontFamily
                 }
-                Text(
-                    text = subtitleText,
-                    fontFamily = previewFont,
-                    color = Color(selectedColorHex),
-                    fontSize = (fontSizeSp * 0.9f).sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
+                Box(
+                    modifier = Modifier
+                        .background(Color(bgColorHex).copy(alpha = bgOpacity), RoundedCornerShape(8.dp))
+                        .border(outlineWidthDp.dp, Color(outlineColorHex), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = subtitleText,
+                        fontFamily = previewFont,
+                        color = Color(selectedColorHex),
+                        fontSize = (fontSizeSp * 0.85f).sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = when (textAlign) {
+                            "LEFT" -> TextAlign.Start
+                            "RIGHT" -> TextAlign.End
+                            else -> TextAlign.Center
+                        }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 1. FONT SELECTION
-            Text("Select Font:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            // 1. FONT SELECTION & FONT STORE SHORTCUT
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Select Font:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier
+                        .background(Color(0xFF312E81), RoundedCornerShape(6.dp))
+                        .clickable { onOpenFontStore() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.FontDownload, contentDescription = null, tint = Color(0xFFA5B4FC), modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Font Store & Upload ➔", color = Color(0xFFE0E7FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
             Spacer(modifier = Modifier.height(6.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(UrduFontChoice.values()) { font ->
@@ -307,12 +371,12 @@ fun UrduSubtitleSheet(
                                 RoundedCornerShape(8.dp)
                             )
                             .clickable { selectedFont = font }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = font.label,
                             color = if (isSelected) AccentAmber else Color(0xFFCBD5E1),
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                         )
                     }
@@ -321,31 +385,84 @@ fun UrduSubtitleSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 2. FONT COLOR SELECTION
-            Text("Font Color:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            // 2. TEXT ALIGNMENT & ANIMATION PRESET
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Alignment
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Alignment:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .background(Color(0xFF1E212D), RoundedCornerShape(8.dp))
+                            .padding(2.dp)
+                    ) {
+                        listOf(
+                            Triple("LEFT", Icons.Default.FormatAlignLeft, "Left"),
+                            Triple("CENTER", Icons.Default.FormatAlignCenter, "Center"),
+                            Triple("RIGHT", Icons.Default.FormatAlignRight, "Right")
+                        ).forEach { (alignVal, icon, label) ->
+                            val isSel = textAlign == alignVal
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(if (isSel) AccentAmber else Color.Transparent, RoundedCornerShape(6.dp))
+                                    .clickable { textAlign = alignVal }
+                                    .padding(vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(icon, contentDescription = label, tint = if (isSel) Color.Black else Color.White, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Font Size
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Size:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("${fontSizeSp.toInt()} sp", color = AccentAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Slider(
+                        value = fontSizeSp,
+                        onValueChange = { fontSizeSp = it },
+                        valueRange = 14f..42f,
+                        colors = SliderDefaults.colors(thumbColor = AccentAmber, activeTrackColor = AccentAmber)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 3. ANIMATION PRESETS
+            Text("Animation Preset:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(fontColorPalette) { (name, hex) ->
-                    val isSelected = hex == selectedColorHex
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(SubtitleAnimationPreset.values()) { anim ->
+                    val isSel = anim == selectedAnimation
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color(hex))
-                            .border(
-                                width = if (isSelected) 3.dp else 1.dp,
-                                color = if (isSelected) AccentAmber else Color.White.copy(alpha = 0.4f),
-                                shape = CircleShape
-                            )
-                            .clickable { selectedColorHex = hex },
-                        contentAlignment = Alignment.Center
+                            .background(if (isSel) AccentCyan.copy(alpha = 0.25f) else Color(0xFF1E212D), RoundedCornerShape(8.dp))
+                            .border(1.dp, if (isSel) AccentCyan else Color(0xFF2E3345), RoundedCornerShape(8.dp))
+                            .clickable { selectedAnimation = anim }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = name,
-                                tint = if (hex == 0xFFFFFFFFL || hex == 0xFFFACC15L) Color.Black else Color.White,
-                                modifier = Modifier.size(18.dp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(anim.iconEmoji, fontSize = 12.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = anim.label,
+                                color = if (isSel) AccentCyan else Color(0xFFCBD5E1),
+                                fontSize = 11.sp,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
                             )
                         }
                     }
@@ -354,175 +471,190 @@ fun UrduSubtitleSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 3. FONT SIZE SLIDER
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Font Size", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text("${fontSizeSp.toInt()} sp", color = AccentAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-            Slider(
-                value = fontSizeSp,
-                onValueChange = { fontSizeSp = it },
-                valueRange = 14f..48f,
-                colors = SliderDefaults.colors(thumbColor = AccentAmber, activeTrackColor = AccentAmber)
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 4. DURATION SLIDER
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Text Duration", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text(String.format("%.1f sec", durationSec), color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-            Slider(
-                value = durationSec,
-                onValueChange = { durationSec = it },
-                valueRange = 1f..10f,
-                colors = SliderDefaults.colors(thumbColor = AccentCyan, activeTrackColor = AccentCyan)
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 5. STYLE PRESETS
-            Text("Animation & Style Presets:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(6.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(SubtitleStylePreset.values()) { preset ->
-                    val isSelected = preset == selectedPreset
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                if (isSelected) AccentPurple.copy(alpha = 0.25f) else Color(0xFF1E212D),
-                                RoundedCornerShape(8.dp)
+            // 4. COLOR SELECTION (Text & Karaoke Active Color)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Text Color:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(fontColorPalette) { (_, hex) ->
+                            val isSelected = hex == selectedColorHex
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(hex))
+                                    .border(if (isSelected) 2.5.dp else 1.dp, if (isSelected) AccentAmber else Color.White.copy(0.3f), CircleShape)
+                                    .clickable { selectedColorHex = hex }
                             )
-                            .border(
-                                1.dp,
-                                if (isSelected) AccentPurple else Color(0xFF2E3345),
-                                RoundedCornerShape(8.dp)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Karaoke Active Color:", color = Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(fontColorPalette) { (_, hex) ->
+                            val isSelected = hex == activeColorHex
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(hex))
+                                    .border(if (isSelected) 2.5.dp else 1.dp, if (isSelected) AccentCyan else Color.White.copy(0.3f), CircleShape)
+                                    .clickable { activeColorHex = hex }
                             )
-                            .clickable { selectedPreset = preset }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = preset.label,
-                            color = if (isSelected) AccentPurple else Color(0xFFCBD5E1),
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                        )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // ACTION BUTTONS (Save / Add / Delete)
+            // 5. BACKGROUND OPACITY & OUTLINE CONTROLS
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Bg Opacity:", color = Color(0xFF94A3B8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("${(bgOpacity * 100).toInt()}%", color = Color.White, fontSize = 11.sp)
+                    }
+                    Slider(
+                        value = bgOpacity,
+                        onValueChange = { bgOpacity = it },
+                        valueRange = 0f..1f,
+                        colors = SliderDefaults.colors(thumbColor = AccentCyan, activeTrackColor = AccentCyan)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Stroke/Outline:", color = Color(0xFF94A3B8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("${outlineWidthDp.toInt()}dp", color = Color.White, fontSize = 11.sp)
+                    }
+                    Slider(
+                        value = outlineWidthDp,
+                        onValueChange = { outlineWidthDp = it },
+                        valueRange = 0f..6f,
+                        colors = SliderDefaults.colors(thumbColor = AccentPink, activeTrackColor = AccentPink)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 6. SHADOW & GLOW SLIDERS
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Shadow Blur:", color = Color(0xFF94A3B8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("${shadowBlurRadius.toInt()}", color = Color.White, fontSize = 11.sp)
+                    }
+                    Slider(
+                        value = shadowBlurRadius,
+                        onValueChange = { shadowBlurRadius = it },
+                        valueRange = 0f..20f,
+                        colors = SliderDefaults.colors(thumbColor = AccentAmber, activeTrackColor = AccentAmber)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Neon Glow:", color = Color(0xFF94A3B8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("${glowRadius.toInt()}", color = Color.White, fontSize = 11.sp)
+                    }
+                    Slider(
+                        value = glowRadius,
+                        onValueChange = { glowRadius = it },
+                        valueRange = 0f..25f,
+                        colors = SliderDefaults.colors(thumbColor = AccentPurple, activeTrackColor = AccentPurple)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Apply / Save / Delete Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (existingClip != null) {
-                    // Delete Button
                     Button(
                         onClick = {
                             onDeleteSubtitle(existingClip.id)
                             onClose()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7F1D1D)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(0.8f)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                        modifier = Modifier.weight(0.35f),
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Delete", color = Color.White, fontSize = 13.sp)
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
                     }
+                }
 
-                    // Save Changes Button
-                    Button(
-                        onClick = {
-                            val start = existingClip.startMs
-                            val end = start + (durationSec * 1000).toLong()
-                            val words = subtitleText.trim().split(" ").filter { it.isNotBlank() }
-                            val timedWords = if (words.isNotEmpty()) {
-                                val dur = (end - start) / words.size
-                                words.mapIndexed { idx, w ->
-                                    TimedWord(w, start + (idx * dur), start + ((idx + 1) * dur))
-                                }
-                            } else emptyList()
+                Button(
+                    onClick = {
+                        val words = subtitleText.split(" ").filter { it.isNotBlank() }
+                        val durMs = (durationSec * 1000L).toLong()
+                        val step = if (words.isNotEmpty()) durMs / words.size else 0L
+                        val timedWords = words.mapIndexed { idx, w ->
+                            val s = currentPlayheadMs + (idx * step)
+                            TimedWord(w, s, s + step)
+                        }
 
-                            onUpdateSubtitle(
-                                existingClip.copy(
-                                    text = subtitleText,
-                                    endMs = end,
-                                    fontChoice = selectedFont,
-                                    stylePreset = selectedPreset,
-                                    fontSizeSp = fontSizeSp,
-                                    textColorHex = selectedColorHex,
-                                    isRtl = isRtl,
-                                    words = timedWords
-                                )
-                            )
-                            onClose()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentAmber),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1.2f)
-                    ) {
-                        Text("Save Changes", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                } else {
-                    // Add New Text Button
-                    Button(
-                        onClick = {
-                            val start = currentPlayheadMs
-                            val end = start + (durationSec * 1000).toLong()
-                            val words = subtitleText.trim().split(" ").filter { it.isNotBlank() }
-                            val timedWords = if (words.isNotEmpty()) {
-                                val dur = (end - start) / words.size
-                                words.mapIndexed { idx, w ->
-                                    TimedWord(w, start + (idx * dur), start + ((idx + 1) * dur))
-                                }
-                            } else emptyList()
+                        val updated = (existingClip ?: SubtitleClip(
+                            text = subtitleText,
+                            startMs = currentPlayheadMs,
+                            endMs = currentPlayheadMs + durMs,
+                            words = timedWords,
+                            posY = 0.82f
+                        )).copy(
+                            text = subtitleText,
+                            fontChoice = selectedFont,
+                            stylePreset = selectedPreset,
+                            animationPreset = selectedAnimation,
+                            fontSizeSp = fontSizeSp,
+                            textColorHex = selectedColorHex,
+                            activeColorHex = activeColorHex,
+                            bgColorHex = bgColorHex,
+                            bgOpacity = bgOpacity,
+                            outlineWidthDp = outlineWidthDp,
+                            outlineColorHex = outlineColorHex,
+                            shadowBlurRadius = shadowBlurRadius,
+                            glowRadius = glowRadius,
+                            glowColorHex = glowColorHex,
+                            textAlign = textAlign,
+                            isRtl = isRtl,
+                            words = if (existingClip != null && existingClip.words.isNotEmpty()) existingClip.words else timedWords
+                        )
 
-                            val newSub = SubtitleClip(
-                                text = subtitleText,
-                                startMs = start,
-                                endMs = end,
-                                fontChoice = selectedFont,
-                                stylePreset = selectedPreset,
-                                fontSizeSp = fontSizeSp,
-                                textColorHex = selectedColorHex,
-                                isRtl = isRtl,
-                                words = timedWords,
-                                posX = 0.5f,
-                                posY = 0.8f
-                            )
-                            onAddSubtitle(newSub)
-                            onClose()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentAmber),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("+ Add Text to Video", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
+                        if (existingClip != null) {
+                            onUpdateSubtitle(updated)
+                        } else {
+                            onAddSubtitle(updated)
+                        }
+                        onClose()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentAmber),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (existingClip != null) "Save Subtitle Changes" else "Add Subtitle to Canvas",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         } else {
-            // ================= TAB 1: MANUAL GENERATE SUBTITLES =================
+            // TAB 1: AI AUTO-SUBTITLES GENERATION
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF131724), RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0xFF26304A), RoundedCornerShape(12.dp))
+                    .background(Color(0xFF131722), RoundedCornerShape(12.dp))
                     .padding(16.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -535,13 +667,13 @@ fun UrduSubtitleSheet(
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = "AI Audio Subtitle Generation",
+                            text = "AI Audio Subtitle Engine",
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Transcribe real video audio & generate Urdu Nastaliq subtitles with Gemini AI",
+                            text = "Auto-breaks long speech into viral 3-4 word synchronized chunks in lower-third",
                             color = Color(0xFF94A3B8),
                             fontSize = 11.sp
                         )
@@ -606,7 +738,6 @@ fun UrduSubtitleSheet(
                         }
                     }
                 } else {
-                    // Big Trigger Button
                     Button(
                         onClick = {
                             onGenerateSubtitles()
@@ -636,7 +767,7 @@ fun UrduSubtitleSheet(
                             .padding(10.dp)
                     ) {
                         Text(
-                            text = subtitleGenerationStatus ?: "✓ Subtitles generated successfully and placed on timeline! You can drag, resize, rotate, or trim them on canvas.",
+                            text = subtitleGenerationStatus ?: "✓ Subtitles generated successfully into 3-4 word chunks and placed on timeline! Tap any chunk to edit in Inspector.",
                             color = Color(0xFFD1FAE5),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold

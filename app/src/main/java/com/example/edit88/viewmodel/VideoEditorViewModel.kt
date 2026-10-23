@@ -47,7 +47,8 @@ enum class SheetType {
     ADD_MEDIA,
     SRT_EXPORT,
     TEXT_EDIT,
-    OVERLAY_PIP
+    OVERLAY_PIP,
+    FONT_STORE
 }
 
 data class EditorUiState(
@@ -542,6 +543,25 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
                 project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()),
                 selectedSubtitleId = updatedClip.id
             )
+        }
+    }
+
+    fun setSubtitleFont(fontChoice: UrduFontChoice, customPath: String? = null) {
+        val selectedId = _uiState.value.selectedSubtitleId
+        if (selectedId != null) {
+            pushHistory()
+            val updated = _uiState.value.project.subtitles.map { sub ->
+                if (sub.id == selectedId) {
+                    sub.copy(
+                        fontChoice = fontChoice,
+                        customFontPath = customPath,
+                        customFontName = if (customPath != null) java.io.File(customPath).nameWithoutExtension else null
+                    )
+                } else sub
+            }
+            _uiState.update {
+                it.copy(project = it.project.copy(subtitles = updated, updatedAt = System.currentTimeMillis()))
+            }
         }
     }
 

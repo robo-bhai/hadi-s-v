@@ -224,6 +224,36 @@ fun VideoCanvasPreview(
                             drawRect(color = tempColor)
                         }
 
+                        // Tint Layer (Green vs Magenta)
+                        if (grading.tint != 0f) {
+                            val tintColor = if (grading.tint > 0f) {
+                                Color(0xFFD946EF).copy(alpha = (grading.tint * 0.22f).coerceIn(0f, 0.45f))
+                            } else {
+                                Color(0xFF10B981).copy(alpha = (-grading.tint * 0.22f).coerceIn(0f, 0.45f))
+                            }
+                            drawRect(color = tintColor)
+                        }
+
+                        // Highlights Adjustment Layer
+                        if (grading.highlights != 0f) {
+                            val hlColor = if (grading.highlights > 0f) {
+                                Color(0xFFFFFFFF).copy(alpha = (grading.highlights * 0.18f).coerceIn(0f, 0.35f))
+                            } else {
+                                Color(0xFF1E293B).copy(alpha = (-grading.highlights * 0.18f).coerceIn(0f, 0.35f))
+                            }
+                            drawRect(color = hlColor)
+                        }
+
+                        // Shadows Adjustment Layer
+                        if (grading.shadows != 0f) {
+                            val shColor = if (grading.shadows < 0f) {
+                                Color(0xFF000000).copy(alpha = (-grading.shadows * 0.28f).coerceIn(0f, 0.55f))
+                            } else {
+                                Color(0xFF94A3B8).copy(alpha = (grading.shadows * 0.15f).coerceIn(0f, 0.3f))
+                            }
+                            drawRect(color = shColor)
+                        }
+
                         // Brightness adjustment layer
                         if (brightnessShift != 0f) {
                             val bColor = if (brightnessShift > 0f) Color.White.copy(alpha = brightnessShift) else Color.Black.copy(alpha = -brightnessShift)
@@ -292,6 +322,36 @@ fun VideoCanvasPreview(
                                 Color(0xFF0284C7).copy(alpha = (-grading.temperature * 0.25f).coerceIn(0f, 0.4f))
                             }
                             drawRect(color = tempColor)
+                        }
+
+                        // Tint Layer (Green vs Magenta)
+                        if (grading.tint != 0f) {
+                            val tintColor = if (grading.tint > 0f) {
+                                Color(0xFFD946EF).copy(alpha = (grading.tint * 0.22f).coerceIn(0f, 0.45f))
+                            } else {
+                                Color(0xFF10B981).copy(alpha = (-grading.tint * 0.22f).coerceIn(0f, 0.45f))
+                            }
+                            drawRect(color = tintColor)
+                        }
+
+                        // Highlights Adjustment Layer
+                        if (grading.highlights != 0f) {
+                            val hlColor = if (grading.highlights > 0f) {
+                                Color(0xFFFFFFFF).copy(alpha = (grading.highlights * 0.18f).coerceIn(0f, 0.35f))
+                            } else {
+                                Color(0xFF1E293B).copy(alpha = (-grading.highlights * 0.18f).coerceIn(0f, 0.35f))
+                            }
+                            drawRect(color = hlColor)
+                        }
+
+                        // Shadows Adjustment Layer
+                        if (grading.shadows != 0f) {
+                            val shColor = if (grading.shadows < 0f) {
+                                Color(0xFF000000).copy(alpha = (-grading.shadows * 0.28f).coerceIn(0f, 0.55f))
+                            } else {
+                                Color(0xFF94A3B8).copy(alpha = (grading.shadows * 0.15f).coerceIn(0f, 0.3f))
+                            }
+                            drawRect(color = shColor)
                         }
 
                         // Brightness adjustment layer
@@ -633,9 +693,10 @@ fun VideoCanvasPreview(
                                 }
                             }
                             .clickable {
-                                onSelectSubtitle?.invoke(if (isSubtitleSelected) null else activeSubtitle.id)
+                                onSelectSubtitle?.invoke(activeSubtitle.id)
                                 internalSelectedOverlayId = null
                                 onSelectOverlay?.invoke(null)
+                                onEditSubtitle?.invoke(activeSubtitle)
                             }
                             .padding(6.dp)
                     ) {

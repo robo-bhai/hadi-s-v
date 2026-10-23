@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,14 +59,31 @@ fun ColorAndFiltersSheet(
     var saturation by remember { mutableFloatStateOf(initialGrading.saturation) }
     var exposure by remember { mutableFloatStateOf(initialGrading.exposure) }
     var temperature by remember { mutableFloatStateOf(initialGrading.temperature) }
+    var tint by remember { mutableFloatStateOf(initialGrading.tint) }
+    var highlights by remember { mutableFloatStateOf(initialGrading.highlights) }
+    var shadows by remember { mutableFloatStateOf(initialGrading.shadows) }
     var vignette by remember { mutableFloatStateOf(initialGrading.vignette) }
     var hue by remember { mutableFloatStateOf(initialGrading.hue) }
+
+    fun currentGrading() = ColorGrading(
+        brightness = brightness,
+        contrast = contrast,
+        saturation = saturation,
+        exposure = exposure,
+        temperature = temperature,
+        tint = tint,
+        highlights = highlights,
+        shadows = shadows,
+        vignette = vignette,
+        hue = hue
+    )
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(DarkSurface, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .padding(20.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         // Handle bar
         Box(
@@ -105,6 +123,9 @@ fun ColorAndFiltersSheet(
                 saturation = 1f
                 exposure = 0f
                 temperature = 0f
+                tint = 0f
+                highlights = 0f
+                shadows = 0f
                 vignette = 0f
                 hue = 0f
                 onApply(FilterType.NONE, ColorGrading())
@@ -139,10 +160,7 @@ fun ColorAndFiltersSheet(
                         )
                         .clickable {
                             selectedFilter = filter
-                            onApply(
-                                selectedFilter,
-                                ColorGrading(brightness, contrast, saturation, temperature, vignette)
-                            )
+                            onApply(selectedFilter, currentGrading())
                         }
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
@@ -166,7 +184,7 @@ fun ColorAndFiltersSheet(
             formatValue = { "${(it * 100).toInt()}" },
             onValueChange = {
                 brightness = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+                onApply(selectedFilter, currentGrading())
             }
         )
 
@@ -177,7 +195,7 @@ fun ColorAndFiltersSheet(
             formatValue = { "${(it * 100).toInt()}%" },
             onValueChange = {
                 contrast = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+                onApply(selectedFilter, currentGrading())
             }
         )
 
@@ -188,7 +206,7 @@ fun ColorAndFiltersSheet(
             formatValue = { "${(it * 100).toInt()}%" },
             onValueChange = {
                 saturation = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+                onApply(selectedFilter, currentGrading())
             }
         )
 
@@ -199,7 +217,7 @@ fun ColorAndFiltersSheet(
             formatValue = { if (it > 0) "+${(it * 100).toInt()}" else "${(it * 100).toInt()}" },
             onValueChange = {
                 exposure = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+                onApply(selectedFilter, currentGrading())
             }
         )
 
@@ -207,10 +225,43 @@ fun ColorAndFiltersSheet(
             label = "Warmth / Temperature",
             value = temperature,
             valueRange = -1.0f..1.0f,
-            formatValue = { if (it > 0) "+${(it * 100).toInt()}" else "${(it * 100).toInt()}" },
+            formatValue = { if (it > 0) "+${(it * 100).toInt()} (Warm)" else if (it < 0) "${(it * 100).toInt()} (Cool)" else "Neutral" },
             onValueChange = {
                 temperature = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+                onApply(selectedFilter, currentGrading())
+            }
+        )
+
+        ColorSliderRow(
+            label = "Tint (Green ↔ Magenta)",
+            value = tint,
+            valueRange = -1.0f..1.0f,
+            formatValue = { if (it > 0) "+${(it * 100).toInt()} (Magenta)" else if (it < 0) "${(it * 100).toInt()} (Green)" else "Neutral" },
+            onValueChange = {
+                tint = it
+                onApply(selectedFilter, currentGrading())
+            }
+        )
+
+        ColorSliderRow(
+            label = "Highlights",
+            value = highlights,
+            valueRange = -1.0f..1.0f,
+            formatValue = { if (it > 0) "+${(it * 100).toInt()}" else "${(it * 100).toInt()}" },
+            onValueChange = {
+                highlights = it
+                onApply(selectedFilter, currentGrading())
+            }
+        )
+
+        ColorSliderRow(
+            label = "Shadows",
+            value = shadows,
+            valueRange = -1.0f..1.0f,
+            formatValue = { if (it > 0) "+${(it * 100).toInt()} (Lifted)" else if (it < 0) "${(it * 100).toInt()} (Crushed)" else "0" },
+            onValueChange = {
+                shadows = it
+                onApply(selectedFilter, currentGrading())
             }
         )
 
@@ -221,7 +272,7 @@ fun ColorAndFiltersSheet(
             formatValue = { "${(it * 100).toInt()}%" },
             onValueChange = {
                 vignette = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+                onApply(selectedFilter, currentGrading())
             }
         )
 
@@ -232,7 +283,7 @@ fun ColorAndFiltersSheet(
             formatValue = { "${it.toInt()}°" },
             onValueChange = {
                 hue = it
-                onApply(selectedFilter, ColorGrading(brightness, contrast, saturation, exposure, temperature, vignette, hue))
+                onApply(selectedFilter, currentGrading())
             }
         )
 

@@ -45,6 +45,9 @@ data class ColorGrading(
     val saturation: Float = 1f,    // 0f to 2f
     val exposure: Float = 0f,      // -1f to 1f
     val temperature: Float = 0f,   // -1f (cool) to 1f (warm)
+    val tint: Float = 0f,          // -1f (green) to 1f (magenta)
+    val highlights: Float = 0f,    // -1f to 1f
+    val shadows: Float = 0f,       // -1f to 1f
     val vignette: Float = 0f,      // 0f to 1f
     val hue: Float = 0f            // -180f to 180f
 )
@@ -127,7 +130,8 @@ enum class UrduFontChoice(val label: String) {
     SYSTEM_SANS("Modern Sans"),
     SERIF("Classic Serif"),
     IMPACT("Bold Impact"),
-    CURSIVE("Script / Cursive")
+    CURSIVE("Script / Cursive"),
+    CUSTOM_IMPORTED("Custom Font (فائل)")
 }
 
 enum class SubtitleStylePreset(val label: String) {
@@ -136,6 +140,15 @@ enum class SubtitleStylePreset(val label: String) {
     BOXED_SUB("Classic Box Sub"),
     RETRO_STROKE("Bold Outline"),
     MINIMAL("Clean Minimal")
+}
+
+enum class SubtitleAnimationPreset(val label: String, val iconEmoji: String) {
+    NONE("Static", "⏹"),
+    POP("Elastic Pop", "💥"),
+    FADE("Smooth Fade", "🌫"),
+    TYPEWRITER("Typewriter", "⌨"),
+    KARAOKE_BOUNCE("Karaoke Bounce", "🎤"),
+    SLIDE_UP("Slide Up", "⬆")
 }
 
 data class TimedWord(
@@ -150,16 +163,26 @@ data class SubtitleClip(
     val startMs: Long,
     val endMs: Long,
     val fontChoice: UrduFontChoice = UrduFontChoice.NOTO_NASTALIQ,
+    val customFontPath: String? = null,
+    val customFontName: String? = null,
     val stylePreset: SubtitleStylePreset = SubtitleStylePreset.KARAOKE,
-    val fontSizeSp: Float = 22f,
+    val animationPreset: SubtitleAnimationPreset = SubtitleAnimationPreset.POP,
+    val fontSizeSp: Float = 24f,
     val textColorHex: Long = 0xFFFFFFFF,
     val activeColorHex: Long = 0xFFFACC15, // Yellow highlight for karaoke
     val outlineColorHex: Long = 0xFF000000,
-    val bgColorHex: Long = 0x99000000,
+    val outlineWidthDp: Float = 2.0f,
+    val bgColorHex: Long = 0xAA000000,
+    val bgOpacity: Float = 0.75f,
+    val shadowBlurRadius: Float = 8f,
+    val shadowColorHex: Long = 0xFF000000,
+    val glowColorHex: Long = 0xFF06B6D4,
+    val glowRadius: Float = 0f,
+    val textAlign: String = "CENTER", // "LEFT", "CENTER", "RIGHT"
     val isRtl: Boolean = true,
     val words: List<TimedWord> = emptyList(),
     val posX: Float = 0.5f, // Normalized 0f to 1f
-    val posY: Float = 0.82f,
+    val posY: Float = 0.82f, // Default lower-third standard subtitle zone
     val scale: Float = 1.0f,
     val rotation: Float = 0f
 )

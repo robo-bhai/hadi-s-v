@@ -81,8 +81,11 @@ import com.example.ui.theme.TrackSubtitleColor
 import com.example.ui.theme.TrackVideoColor
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.gestures.detectTransformGestures
+import java.io.File
 
 import com.example.edit88.model.TransitionType
 
@@ -119,9 +122,11 @@ fun MultiTrackTimeline(
     selectedSubtitleId: String? = null,
     selectedOverlayId: String? = null,
     timelineZoom: Float = 1.0f,
+    onZoomChange: ((Float) -> Unit)? = null,
     onSelectClip: (String) -> Unit,
     onSelectAudioTrack: ((String) -> Unit)? = null,
     onSelectSubtitle: ((String) -> Unit)? = null,
+    onEditSubtitle: ((SubtitleClip) -> Unit)? = null,
     onSelectOverlay: ((String) -> Unit)? = null,
     onReorderClips: ((Int, Int) -> Unit)? = null,
     onMoveAudioTrack: ((String, Long) -> Unit)? = null,
@@ -141,8 +146,8 @@ fun MultiTrackTimeline(
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
 
-    // Scale: 1000ms = 60dp (scaled by zoom)
-    val msPerDp = (1000f / 60f) / timelineZoom.coerceIn(0.5f, 3.0f)
+    // Scale: 1000ms = 60dp (scaled by zoom from 0.25x overview to 5.0x frame-by-frame precision)
+    val msPerDp = (1000f / 60f) / timelineZoom.coerceIn(0.25f, 5.0f)
     val totalDurationMs = project.totalDurationMs.coerceAtLeast(15000L)
     val timelineWidthDp = (totalDurationMs / msPerDp).dp
 
@@ -152,7 +157,7 @@ fun MultiTrackTimeline(
             .background(Color(0xFF13151D))
             .border(1.dp, Color(0xFF222533))
     ) {
-        // Track Labels & Time Ruler Header
+        // Track Labels, Zoom Controls & Time Ruler Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -170,16 +175,29 @@ fun MultiTrackTimeline(
                 Text("Tracks", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
 
-            // Scrollable Time Ruler
+            // Pinch-to-zoom & Scrollable Time Ruler
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .horizontalScroll(scrollState)
+                    .pointerInput(timelineZoom) {
+                        detectTransformGestures(panZoomLock = false) { _, _, zoom, _ ->
+                            if (zoom != 1f) {
+                                val newZoom = (timelineZoom * zoom).coerceIn(0.25f, 5.0f)
+                                onZoomChange?.invoke(newZoom)
+                            }
+                        }
+                    }
             ) {
                 Row(
                     modifier = Modifier.width(timelineWidthDp + 200.dp)
                 ) {
-                    val stepSec = 2
+                    val stepSec = when {
+                        timelineZoom >= 3.0f -> 1
+                        timelineZoom >= 1.5f -> 2
+                        timelineZoom <= 0.6f -> 5
+                        else -> 2
+                    }
                     val totalSec = (totalDurationMs / 1000).toInt() + 4
                     for (sec in 0..totalSec step stepSec) {
                         val secWidthDp = (stepSec * 1000 / msPerDp).dp
@@ -200,6 +218,46 @@ fun MultiTrackTimeline(
                             )
                         }
                     }
+                }
+            }
+
+            // Quick Pinch/Zoom Controls
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
+                Text(
+                    text = String.format("%.1fx", timelineZoom),
+                    color = Color(0xFF38BDF8),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
+                        .clickable { onZoomChange?.invoke((timelineZoom - 0.25f).coerceIn(0.25f, 5.0f)) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text("-", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.width(2.dp))
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
+                        .clickable { onZoomChange?.invoke(1.0f) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text("1x", color = Color(0xFF94A3B8), fontSize = 9.sp)
+                }
+                Spacer(modifier = Modifier.width(2.dp))
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
+                        .clickable { onZoomChange?.invoke((timelineZoom + 0.35f).coerceIn(0.25f, 5.0f)) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text("+", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -279,6 +337,7 @@ fun MultiTrackTimeline(
                             msPerDp = msPerDp,
                             selectedSubtitleId = selectedSubtitleId,
                             onSelectSubtitle = onSelectSubtitle,
+                            onEditSubtitle = onEditSubtitle,
                             onMoveSubtitle = onMoveSubtitle,
                             onUpdateSubtitleDuration = onUpdateSubtitleDuration,
                             onAddTextClick = onAddTextClick,
@@ -775,6 +834,7 @@ private fun SubtitleTrackRow(
     msPerDp: Float,
     selectedSubtitleId: String?,
     onSelectSubtitle: ((String) -> Unit)?,
+    onEditSubtitle: ((SubtitleClip) -> Unit)? = null,
     onMoveSubtitle: ((String, Long) -> Unit)? = null,
     onUpdateSubtitleDuration: ((String, Long, Long) -> Unit)?,
     onAddTextClick: (() -> Unit)?,
@@ -839,6 +899,15 @@ private fun SubtitleTrackRow(
                     UrduFontChoice.SERIF -> FontFamily.Serif
                     UrduFontChoice.IMPACT -> FontFamily.SansSerif
                     UrduFontChoice.CURSIVE -> FontFamily.Cursive
+                    UrduFontChoice.CUSTOM_IMPORTED -> {
+                        if (!sub.customFontPath.isNullOrBlank() && File(sub.customFontPath).exists()) {
+                            try {
+                                FontFamily(Font(File(sub.customFontPath)))
+                            } catch (_: Exception) {
+                                NotoNastaliqUrduFontFamily
+                            }
+                        } else NotoNastaliqUrduFontFamily
+                    }
                 }
 
                 Box(
@@ -862,6 +931,7 @@ private fun SubtitleTrackRow(
                         .clickable {
                             onSelectSubtitle?.invoke(sub.id)
                             onSeekTo(sub.startMs)
+                            onEditSubtitle?.invoke(sub)
                         }
                         .pointerInput(sub.id) {
                             detectDragGesturesAfterLongPress(

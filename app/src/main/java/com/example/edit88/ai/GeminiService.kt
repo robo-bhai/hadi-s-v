@@ -275,23 +275,85 @@ class GeminiService {
                                 endMs = end,
                                 fontChoice = UrduFontChoice.NOTO_NASTALIQ,
                                 stylePreset = SubtitleStylePreset.KARAOKE,
-                                fontSizeSp = 22f,
+                                fontSizeSp = 24f,
                                 isRtl = true,
                                 words = words,
                                 posX = 0.5f,
-                                posY = 0.82f
+                                posY = 0.82f,
+                                bgColorHex = 0xAA000000,
+                                bgOpacity = 0.75f,
+                                outlineWidthDp = 2.0f,
+                                outlineColorHex = 0xFF000000,
+                                shadowBlurRadius = 10f
                             )
                         )
                     }
-                    if (list.isNotEmpty()) return@withContext list
+                    if (list.isNotEmpty()) return@withContext chunkSubtitlesToWords(list, 3)
                 }
             } catch (_: Exception) {
                 // fallback to contextual generator
             }
         }
 
-        // Dynamic project-tailored Urdu subtitles
-        return@withContext generateContextualSubtitlesForProject(project)
+        // Dynamic project-tailored Urdu subtitles auto-broken into 3-4 word chunks
+        return@withContext chunkSubtitlesToWords(generateContextualSubtitlesForProject(project), 3)
+    }
+
+    fun chunkSubtitlesToWords(
+        subtitles: List<SubtitleClip>,
+        maxWordsPerChunk: Int = 3
+    ): List<SubtitleClip> {
+        val result = mutableListOf<SubtitleClip>()
+        for (sub in subtitles) {
+            val words = if (sub.words.isNotEmpty()) {
+                sub.words
+            } else {
+                val split = sub.text.split(" ").filter { it.isNotBlank() }
+                val step = if (split.isNotEmpty()) (sub.endMs - sub.startMs) / split.size else 0L
+                split.mapIndexed { idx, w ->
+                    TimedWord(w, sub.startMs + (idx * step), sub.startMs + ((idx + 1) * step))
+                }
+            }
+
+            if (words.size <= maxWordsPerChunk) {
+                result.add(
+                    sub.copy(
+                        posY = 0.82f,
+                        fontSizeSp = 24f,
+                        bgColorHex = 0xAA000000,
+                        bgOpacity = 0.75f,
+                        outlineWidthDp = 2.0f,
+                        outlineColorHex = 0xFF000000,
+                        shadowBlurRadius = 10f,
+                        words = words
+                    )
+                )
+            } else {
+                val chunks = words.chunked(maxWordsPerChunk)
+                chunks.forEach { chunkWords ->
+                    val cStart = chunkWords.first().startOffsetMs
+                    val cEnd = chunkWords.last().endOffsetMs.coerceAtLeast(cStart + 600L)
+                    val cText = chunkWords.joinToString(" ") { it.word }
+                    result.add(
+                        sub.copy(
+                            id = UUID.randomUUID().toString(),
+                            text = cText,
+                            startMs = cStart,
+                            endMs = cEnd,
+                            posY = 0.82f,
+                            fontSizeSp = 24f,
+                            bgColorHex = 0xAA000000,
+                            bgOpacity = 0.75f,
+                            outlineWidthDp = 2.0f,
+                            outlineColorHex = 0xFF000000,
+                            shadowBlurRadius = 10f,
+                            words = chunkWords
+                        )
+                    )
+                }
+            }
+        }
+        return result
     }
 
     private fun generateContextualSubtitlesForProject(project: Project): List<SubtitleClip> {
