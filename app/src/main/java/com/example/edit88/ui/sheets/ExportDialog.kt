@@ -56,6 +56,7 @@ import com.example.edit88.model.AspectRatioType
 import com.example.edit88.model.ExportFps
 import com.example.edit88.model.ExportFormat
 import com.example.edit88.model.ExportResolution
+import com.example.edit88.export.VideoExportEngine
 import com.example.edit88.model.Project
 import com.example.ui.theme.AccentCyan
 import com.example.ui.theme.AccentEmerald
@@ -201,41 +202,24 @@ fun ExportDialog(
 
     val animatedProgress by animateFloatAsState(targetValue = exportProgress, label = "progress")
 
-    // Realistic smooth multi-pass rendering and actual MediaStore export
+    // Real-time GPU video compositor, color grading, Nastaliq subtitle burn-in, and audio muxing
     LaunchedEffect(isExporting) {
         if (isExporting) {
-            exportProgress = 0.08f
-            currentPhase = "Initializing GPU hardware video encoder..."
-            delay(350)
-
-            exportProgress = 0.22f
-            currentPhase = "Compositing ${project.clips.size} clips & transitions at ${selectedFps.fps}fps..."
-            delay(450)
-
-            exportProgress = 0.45f
-            currentPhase = "Applying color grading, LUTs & speed curve interpolation..."
-            delay(500)
-
-            exportProgress = 0.65f
-            currentPhase = "Mixing ${project.audioTracks.size} audio stems & background music..."
-            delay(450)
-
-            exportProgress = 0.82f
-            currentPhase = "Burning Nastaliq Urdu subtitles & PiP overlays..."
-            delay(400)
-
-            exportProgress = 0.95f
-            currentPhase = "Encoding final ${selectedFormat.extension.uppercase()} ($resWidth×$resHeight @${selectedFps.fps}fps)..."
-            delay(400)
-
-            // Direct save to device storage (Movies/Edit88)
-            val uri = saveVideoToDeviceMediaStore(context, project, outputFileName, selectedFormat)
+            val uri = VideoExportEngine.exportProjectVideo(
+                context = context,
+                project = project,
+                resolution = selectedRes,
+                fps = selectedFps,
+                format = selectedFormat,
+                onProgress = { pct, phase ->
+                    exportProgress = pct
+                    currentPhase = phase
+                }
+            )
             savedUri = uri
-
             exportProgress = 1.0f
             currentPhase = "Saved directly to device gallery: Movies/Edit88"
             delay(300)
-
             isCompleted = true
         }
     }

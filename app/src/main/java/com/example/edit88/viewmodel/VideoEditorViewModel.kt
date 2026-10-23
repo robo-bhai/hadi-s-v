@@ -591,7 +591,7 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
         text: String = "نیا عنوان شامل کریں",
         fontChoice: UrduFontChoice = UrduFontChoice.NOTO_NASTALIQ,
         stylePreset: SubtitleStylePreset = SubtitleStylePreset.KARAOKE,
-        fontSizeSp: Float = 18f,
+        fontSizeSp: Float = 15f,
         textColorHex: Long = 0xFFFFFFFF,
         isRtl: Boolean = true
     ) {
@@ -958,7 +958,7 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
                     endMs = 3800L,
                     fontChoice = UrduFontChoice.NOTO_NASTALIQ,
                     stylePreset = SubtitleStylePreset.KARAOKE,
-                    fontSizeSp = 18f,
+                    fontSizeSp = 15f,
                     posY = 0.82f,
                     words = listOf(TimedWord("منفرد", 500L, 1400L), TimedWord("انداز میں", 1400L, 2500L), TimedWord("ویڈیو بنائیں", 2500L, 3800L))
                 )

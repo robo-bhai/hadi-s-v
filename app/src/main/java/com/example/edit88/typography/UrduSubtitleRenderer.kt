@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -195,25 +196,25 @@ private fun KaraokeSubtitleView(
         UrduFontChoice.AMIRI,
         UrduFontChoice.LATEEF
     )
-    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.6f).sp else (clip.fontSizeSp * 1.35f).sp
+    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.8f).sp else (clip.fontSizeSp * 1.45f).sp
 
     val backgroundColor = Color(clip.bgColorHex).copy(alpha = clip.bgOpacity.coerceIn(0f, 1f))
     val outlineBorderColor = if (clip.outlineWidthDp > 0f) Color(clip.outlineColorHex) else Color.Transparent
 
-    val arrangement = when (textAlign) {
-        TextAlign.Start -> Arrangement.Start
-        TextAlign.End -> Arrangement.End
-        else -> Arrangement.Center
+    val horizontalAlign = when (textAlign) {
+        TextAlign.Start -> Alignment.Start
+        TextAlign.End -> Alignment.End
+        else -> Alignment.CenterHorizontally
     }
 
     if (clip.words.isNotEmpty()) {
         Row(
             modifier = Modifier
                 .wrapContentWidth()
-                .background(backgroundColor, RoundedCornerShape(10.dp))
-                .border(clip.outlineWidthDp.dp, outlineBorderColor, RoundedCornerShape(10.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = arrangement,
+                .background(backgroundColor, RoundedCornerShape(12.dp))
+                .border(clip.outlineWidthDp.dp, outlineBorderColor, RoundedCornerShape(12.dp))
+                .padding(horizontal = 22.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, alignment = horizontalAlign),
             verticalAlignment = Alignment.CenterVertically
         ) {
             for (timedWord in clip.words) {
@@ -228,7 +229,7 @@ private fun KaraokeSubtitleView(
 
                     val wordScale by animateFloatAsState(
                         targetValue = if (isActive) {
-                            if (isKaraokeBounce) 1.22f else 1.12f
+                            if (isKaraokeBounce) 1.20f else 1.10f
                         } else 1.0f,
                         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
                         label = "wordScale"
@@ -249,7 +250,7 @@ private fun KaraokeSubtitleView(
                     }
 
                     Text(
-                        text = "${timedWord.word} ",
+                        text = timedWord.word,
                         fontFamily = fontFamily,
                         fontSize = clip.fontSizeSp.sp,
                         lineHeight = lineHeightVal,
@@ -257,13 +258,14 @@ private fun KaraokeSubtitleView(
                         color = wordColor,
                         maxLines = 1,
                         softWrap = false,
+                        overflow = TextOverflow.Visible,
                         textAlign = textAlign,
                         style = TextStyle(
                             platformStyle = PlatformTextStyle(includeFontPadding = true),
                             shadow = glowShadow
                         ),
                         modifier = Modifier
-                            .padding(horizontal = 2.dp, vertical = 2.dp)
+                            .padding(horizontal = 3.dp, vertical = 2.dp)
                             .scale(wordScale)
                     )
                 }
@@ -287,15 +289,16 @@ private fun KaraokeSubtitleView(
             textAlign = textAlign,
             maxLines = 1,
             softWrap = false,
+            overflow = TextOverflow.Visible,
             style = TextStyle(
                 platformStyle = PlatformTextStyle(includeFontPadding = true),
                 shadow = glowShadow
             ),
             modifier = Modifier
                 .wrapContentWidth()
-                .background(backgroundColor, RoundedCornerShape(10.dp))
-                .border(clip.outlineWidthDp.dp, outlineBorderColor, RoundedCornerShape(10.dp))
-                .padding(horizontal = 14.dp, vertical = 6.dp)
+                .background(backgroundColor, RoundedCornerShape(12.dp))
+                .border(clip.outlineWidthDp.dp, outlineBorderColor, RoundedCornerShape(12.dp))
+                .padding(horizontal = 22.dp, vertical = 7.dp)
         )
     }
 }
@@ -312,15 +315,15 @@ private fun NeonGlowSubtitleView(
         UrduFontChoice.AMIRI,
         UrduFontChoice.LATEEF
     )
-    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.6f).sp else (clip.fontSizeSp * 1.35f).sp
+    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.8f).sp else (clip.fontSizeSp * 1.45f).sp
     val glowColor = if (clip.glowRadius > 0f) Color(clip.glowColorHex) else Color(0xFF06B6D4)
 
     Box(
         modifier = Modifier
-            .widthIn(max = 540.dp)
+            .wrapContentWidth()
             .border(1.5.dp, glowColor, RoundedCornerShape(14.dp))
             .background(Color(clip.bgColorHex).copy(alpha = clip.bgOpacity), RoundedCornerShape(14.dp))
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 22.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -333,6 +336,7 @@ private fun NeonGlowSubtitleView(
             textAlign = textAlign,
             maxLines = 1,
             softWrap = false,
+            overflow = TextOverflow.Visible,
             style = TextStyle(
                 platformStyle = PlatformTextStyle(includeFontPadding = true),
                 shadow = Shadow(
@@ -357,15 +361,15 @@ private fun BoxedSubtitleView(
         UrduFontChoice.AMIRI,
         UrduFontChoice.LATEEF
     )
-    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.6f).sp else (clip.fontSizeSp * 1.35f).sp
+    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.8f).sp else (clip.fontSizeSp * 1.45f).sp
 
     Box(
         modifier = Modifier
             .wrapContentWidth()
-            .shadow(clip.shadowBlurRadius.dp, RoundedCornerShape(8.dp))
-            .background(Color(clip.bgColorHex).copy(alpha = clip.bgOpacity), RoundedCornerShape(8.dp))
-            .border(clip.outlineWidthDp.dp, Color(clip.outlineColorHex), RoundedCornerShape(8.dp))
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .shadow(clip.shadowBlurRadius.dp, RoundedCornerShape(10.dp))
+            .background(Color(clip.bgColorHex).copy(alpha = clip.bgOpacity), RoundedCornerShape(10.dp))
+            .border(clip.outlineWidthDp.dp, Color(clip.outlineColorHex), RoundedCornerShape(10.dp))
+            .padding(horizontal = 22.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -378,6 +382,7 @@ private fun BoxedSubtitleView(
             textAlign = textAlign,
             maxLines = 1,
             softWrap = false,
+            overflow = TextOverflow.Visible,
             style = TextStyle(
                 platformStyle = PlatformTextStyle(includeFontPadding = true)
             )
@@ -397,18 +402,19 @@ private fun RetroStrokeSubtitleView(
         UrduFontChoice.AMIRI,
         UrduFontChoice.LATEEF
     )
-    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.6f).sp else (clip.fontSizeSp * 1.35f).sp
+    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.8f).sp else (clip.fontSizeSp * 1.45f).sp
 
     Text(
         text = clip.text,
         fontFamily = fontFamily,
-        fontSize = (clip.fontSizeSp + 2).sp,
+        fontSize = (clip.fontSizeSp + 1).sp,
         lineHeight = lineHeightVal,
         fontWeight = FontWeight.ExtraBold,
         color = Color(clip.textColorHex),
         textAlign = textAlign,
         maxLines = 1,
         softWrap = false,
+        overflow = TextOverflow.Visible,
         style = TextStyle(
             platformStyle = PlatformTextStyle(includeFontPadding = true),
             shadow = Shadow(
@@ -419,7 +425,7 @@ private fun RetroStrokeSubtitleView(
         ),
         modifier = Modifier
             .wrapContentWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 18.dp, vertical = 5.dp)
     )
 }
 
@@ -435,7 +441,7 @@ private fun MinimalSubtitleView(
         UrduFontChoice.AMIRI,
         UrduFontChoice.LATEEF
     )
-    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.6f).sp else (clip.fontSizeSp * 1.35f).sp
+    val lineHeightVal = if (isNastaliq) (clip.fontSizeSp * 1.8f).sp else (clip.fontSizeSp * 1.45f).sp
 
     Text(
         text = clip.text,
@@ -447,6 +453,7 @@ private fun MinimalSubtitleView(
         textAlign = textAlign,
         maxLines = 1,
         softWrap = false,
+        overflow = TextOverflow.Visible,
         style = TextStyle(
             platformStyle = PlatformTextStyle(includeFontPadding = true),
             shadow = Shadow(
@@ -457,6 +464,6 @@ private fun MinimalSubtitleView(
         ),
         modifier = Modifier
             .wrapContentWidth()
-            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     )
 }

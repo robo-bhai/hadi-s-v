@@ -275,7 +275,7 @@ class GeminiService {
                                 endMs = end,
                                 fontChoice = UrduFontChoice.NOTO_NASTALIQ,
                                 stylePreset = SubtitleStylePreset.KARAOKE,
-                                fontSizeSp = 18f,
+                                fontSizeSp = 15f,
                                 isRtl = true,
                                 words = words,
                                 posX = 0.5f,
@@ -319,7 +319,7 @@ class GeminiService {
                 result.add(
                     sub.copy(
                         posY = 0.82f,
-                        fontSizeSp = 18f,
+                        fontSizeSp = 15f,
                         bgColorHex = 0xAA000000,
                         bgOpacity = 0.75f,
                         outlineWidthDp = 2.0f,
@@ -341,7 +341,7 @@ class GeminiService {
                             startMs = cStart,
                             endMs = cEnd,
                             posY = 0.82f,
-                            fontSizeSp = 18f,
+                            fontSizeSp = 15f,
                             bgColorHex = 0xAA000000,
                             bgOpacity = 0.75f,
                             outlineWidthDp = 2.0f,

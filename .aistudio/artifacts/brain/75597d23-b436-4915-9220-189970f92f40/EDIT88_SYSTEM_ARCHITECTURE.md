@@ -131,9 +131,18 @@ ffmpeg -y \
    - 0.1x to 10.0x playback speed adjustment with pitch preservation.
    - Comprehensive color grading: Brightness, Contrast, Saturation, Temperature, Tint, Highlights, Shadows, and LUT Presets.
    - Hardware-accelerated real-time Compose Canvas preview.
-    [1:a]volume=0.85,afade=t=in:ss=0:d=1,afade=t=out:st=13:d=1[a_out]" \
-  -map "[v_out]" -map "[a_out]" \
-  -c:v libx264 -preset fast -b:v 16M \
-  -c:a aac -b:a 192k \
-  -movflags +faststart output_edit88.mp4
-```
+## 8. Real-Time Hardware Video Export Engine & Typography Truncation Fixes
+
+1. **Hardware-Accelerated Composited Video Export (`VideoExportEngine.kt`)**:
+   - Built a comprehensive Android hardware video compositor utilizing native `MediaCodec` (H.264 / `video/avc`), `EGLRenderer` / OpenGL ES 2.0 (`createInputSurface()`), and `MediaMuxer`.
+   - **Video Frame Compositing**: Seamlessly extracts and scales source video frames via `MediaMetadataRetriever` (or generates procedural background scenes).
+   - **Color Grading & Filters**: Burns in real-time filter presets (Cyberpunk, Cinematic, Vintage, B&W, Golden Sunset, Arctic Blue), temperature shifts, tints, brightness/exposure adjustments, and radial vignettes into each frame.
+   - **Burned-In Subtitles & Karaoke**: Renders Urdu Nastaliq typography with frame-accurate word glow, outlines, and rounded pill containers.
+   - **Audio Muxing**: Preserves source video audio tracks and mixes external background tracks using `MediaExtractor` and `MediaMuxer`.
+   - **Direct MediaStore Storage**: Saves encoded MP4 directly into the device gallery under `Movies/Edit88`.
+
+2. **Urdu Nastaliq Truncation & Clipping Elimination**:
+   - **Optimal Font Sizing**: Reduced default subtitle font size to `15sp` (movie subtitle aesthetic) preventing canvas overflow.
+   - **Bidi Word Spacing**: Replaced trailing ASCII whitespace concatenation with Compose layout `Arrangement.spacedBy(8.dp)`, eliminating RTL reordering anomalies.
+   - **Zero Clipping**: Applied `TextOverflow.Visible` across all subtitle styles.
+   - **Generous Safety Padding**: Expanded container horizontal padding to `22.dp`, preventing rounded corners from intersecting with text ascenders, descenders, or swashes.
