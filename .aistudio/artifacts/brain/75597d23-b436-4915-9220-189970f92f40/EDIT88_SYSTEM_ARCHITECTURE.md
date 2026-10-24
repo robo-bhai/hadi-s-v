@@ -146,3 +146,23 @@ ffmpeg -y \
    - **Bidi Word Spacing**: Replaced trailing ASCII whitespace concatenation with Compose layout `Arrangement.spacedBy(8.dp)`, eliminating RTL reordering anomalies.
    - **Zero Clipping**: Applied `TextOverflow.Visible` across all subtitle styles.
    - **Generous Safety Padding**: Expanded container horizontal padding to `22.dp`, preventing rounded corners from intersecting with text ascenders, descenders, or swashes.
+
+---
+
+## 9. Multi-Core Smooth Export Pipeline & Hardware Codec Fixes
+
+1. **Resolution & Alignment Fix (`BAD_VALUE / 0xffffffea`)**:
+   - Hardware AVC encoders require dimensions aligned to multiples of 16 (macroblock boundaries). Unaligned heights (such as 853) fail configuration.
+   - All resolutions (720x1280, 1088x1920, 864x480, 720x896) are strictly aligned to 16.
+   - `MediaCodecInfo.VideoCapabilities` dynamically validates support and clamps safely.
+   - Explicit `KEY_BITRATE_MODE = BITRATE_MODE_VBR` and `KEY_I_FRAME_INTERVAL = 1` ensure stable encoding.
+
+2. **MPEG4Writer Lifecycle Fix (`Already have codec specific data` / `Stop called`)**:
+   - `MediaMuxer` mandates that all tracks (video and audio) must be added prior to calling `muxer.start()`.
+   - Audio tracks from source clips or BGM are extracted and registered simultaneously with the video track on `INFO_OUTPUT_FORMAT_CHANGED`, preventing muxer lifecycle corruption.
+   - Video and audio sample data are interleaved with strictly monotonic timestamps (`presentationTimeUs`).
+
+3. **Smooth Video Motion & Multi-Core Processor / RAM Utilization**:
+   - Switched from keyframe-only `OPTION_CLOSEST_SYNC` to full frame-accurate `OPTION_CLOSEST` (and `getScaledFrameAtTime` on API 27+).
+   - Concurrently renders frames across all available CPU cores using `Dispatchers.Default` and batching.
+   - Smooth clip transitions (`DISSOLVE`, `FLASH_WHITE`, `FLASH_BLACK`, `WHIP_LEFT`) interpolated frame-by-frame.

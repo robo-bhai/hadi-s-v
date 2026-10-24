@@ -40,23 +40,29 @@ import com.example.edit88.model.FilterType
 import com.example.edit88.model.MediaClip
 import com.example.edit88.model.Project
 import com.example.edit88.model.SubtitleClip
+import com.example.edit88.model.TransitionType
 import com.example.edit88.model.UrduFontChoice
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 object VideoExportEngine {
 
     /**
-     * Composes the full project (video clips, color grading, filters, Nastaliq subtitles,
-     * PiP overlays, and mixed audio) into an encoded MP4 video saved directly to device gallery.
+     * High-Performance Hardware Video Compositor & Exporter.
+     * Uses device hardware AVC encoder, OpenGL ES 2.0 surface rendering,
+     * multi-threaded parallel frame compositing, Nastaliq subtitle burn-in,
+     * clip transitions, and synchronized audio track muxing.
      */
     suspend fun exportProjectVideo(
         context: Context,
@@ -66,13 +72,18 @@ object VideoExportEngine {
         format: ExportFormat,
         onProgress: (progress: Float, phase: String) -> Unit
     ): Uri? = withContext(Dispatchers.IO) {
-        val (targetWidth, targetHeight) = getDimensions(resolution, project.aspectRatio)
         val tempOutputFile = File(context.cacheDir, "export_${System.currentTimeMillis()}.${format.extension}")
 
-        try {
-            onProgress(0.05f, "Preparing composition ($targetWidth×$targetHeight @${fps.fps}fps)...")
+        var codec: MediaCodec? = null
+        var muxer: MediaMuxer? = null
+        var eglEnv: EGLRenderer? = null
+        var audioExtractor: MediaExtractor? = null
+        val retrievers = mutableMapOf<String, MediaMetadataRetriever>()
 
-            // Initialize font typefaces for burned-in subtitles
+        try {
+            onProgress(0.04f, "Analyzing project and multi-core processing configuration...")
+
+            // 1. Initialize Urdu Nastaliq Typefaces for burned-in subtitles
             val typefaceCache = mutableMapOf<UrduFontChoice, Typeface>()
             try {
                 ResourcesCompat.getFont(context, R.font.noto_nastaliq_urdu)?.let {
@@ -90,8 +101,7 @@ object VideoExportEngine {
                 }
             } catch (_: Exception) {}
 
-            // Pre-load MediaMetadataRetrievers for local video clips
-            val retrievers = mutableMapOf<String, MediaMetadataRetriever>()
+            // 2. Pre-load MediaMetadataRetrievers for source clips
             for (clip in project.clips) {
                 if (clip.isLocalVideo && !clip.uriString.isNullOrBlank()) {
                     try {
@@ -102,192 +112,307 @@ object VideoExportEngine {
                 }
             }
 
-            // Duration and Frame Calculations
-            val totalDurMs = project.totalDurationMs.coerceAtLeast(1000L)
-            val frameRate = fps.fps
-            val frameIntervalMs = 1000L / frameRate
-            val totalFrames = max(1, (totalDurMs / frameIntervalMs).toInt())
+            // 3. Inspect Source Audio Tracks BEFORE initializing Muxer
+            var audioSourceFormat: MediaFormat? = null
+            var audioTrackUri: Uri? = null
+            for (clip in project.clips) {
+                if (clip.isLocalVideo && !clip.uriString.isNullOrBlank()) {
+                    try {
+                        val testExtractor = MediaExtractor()
+                        testExtractor.setDataSource(context, Uri.parse(clip.uriString), null)
+                        for (i in 0 until testExtractor.trackCount) {
+                            val trackFmt = testExtractor.getTrackFormat(i)
+                            val mime = trackFmt.getString(MediaFormat.KEY_MIME) ?: ""
+                            if (mime.startsWith("audio/")) {
+                                audioSourceFormat = trackFmt
+                                audioTrackUri = Uri.parse(clip.uriString)
+                                break
+                            }
+                        }
+                        testExtractor.release()
+                        if (audioSourceFormat != null) break
+                    } catch (_: Exception) {}
+                }
+            }
 
-            onProgress(0.12f, "Initializing hardware video encoder...")
+            // Also check project audio tracks if video had no audio
+            if (audioSourceFormat == null) {
+                for (aTrack in project.audioTracks) {
+                    if (!aTrack.uriString.isNullOrBlank()) {
+                        try {
+                            val testExtractor = MediaExtractor()
+                            testExtractor.setDataSource(context, Uri.parse(aTrack.uriString), null)
+                            for (i in 0 until testExtractor.trackCount) {
+                                val trackFmt = testExtractor.getTrackFormat(i)
+                                val mime = trackFmt.getString(MediaFormat.KEY_MIME) ?: ""
+                                if (mime.startsWith("audio/")) {
+                                    audioSourceFormat = trackFmt
+                                    audioTrackUri = Uri.parse(aTrack.uriString)
+                                    break
+                                }
+                            }
+                            testExtractor.release()
+                            if (audioSourceFormat != null) break
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
 
-            // Setup MediaCodec & MediaMuxer
+            // 4. Setup Safe Codec Dimensions (aligned strictly to multiples of 16)
             val mimeType = MediaFormat.MIMETYPE_VIDEO_AVC
+            val encoder = MediaCodec.createEncoderByType(mimeType)
+            codec = encoder
+
+            val (targetWidth, targetHeight) = getSafeEncoderDimensions(resolution, project.aspectRatio, encoder)
+            val frameRate = fps.fps
             val bitrate = getBitrateBps(resolution, fps)
+
+            onProgress(0.08f, "Configuring hardware GPU video encoder ($targetWidth×$targetHeight @${frameRate}fps)...")
+
             val videoFormat = MediaFormat.createVideoFormat(mimeType, targetWidth, targetHeight).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
             }
 
-            val codec = MediaCodec.createEncoderByType(mimeType)
-            codec.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            val inputSurface = codec.createInputSurface()
-            codec.start()
+            encoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            val inputSurface = encoder.createInputSurface()
+            encoder.start()
 
-            val muxerFormat = if (format == ExportFormat.MP4) {
-                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-            } else {
-                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-            }
-            val muxer = MediaMuxer(tempOutputFile.absolutePath, muxerFormat)
+            // 5. Initialize MediaMuxer
+            val muxerFormat = MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            val m = MediaMuxer(tempOutputFile.absolutePath, muxerFormat)
+            muxer = m
 
-            // Setup EGL surface for hardware frame drawing
-            val eglEnv = EGLRenderer(inputSurface, targetWidth, targetHeight)
+            // 6. Setup EGL surface for hardware frame drawing
+            eglEnv = EGLRenderer(inputSurface, targetWidth, targetHeight)
 
-            // Canvas & Bitmaps for frame compositing
-            val frameBitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
-            val frameCanvas = Canvas(frameBitmap)
+            // Timeline calculations
+            val totalDurMs = project.totalDurationMs.coerceAtLeast(1000L)
+            val frameIntervalMs = 1000L / frameRate
+            val totalFrames = max(1, (totalDurMs / frameIntervalMs).toInt())
 
             var videoTrackIndex = -1
+            var audioTrackIndex = -1
             var muxerStarted = false
+            var samplesWritten = 0
             val bufferInfo = MediaCodec.BufferInfo()
 
-            // Video encoding loop
-            for (frameIdx in 0 until totalFrames) {
-                val currentPtsMs = frameIdx * frameIntervalMs
-                val presentationTimeNs = currentPtsMs * 1_000_000L
-
-                // Composite frame: video frame + color grade + stickers + subtitles
-                renderCompositionFrame(
-                    context = context,
-                    project = project,
-                    timeMs = currentPtsMs,
-                    targetWidth = targetWidth,
-                    targetHeight = targetHeight,
-                    targetBitmap = frameBitmap,
-                    canvas = frameCanvas,
-                    retrievers = retrievers,
-                    typefaceCache = typefaceCache
-                )
-
-                // Render into encoder surface via EGL & OpenGL
-                eglEnv.drawBitmap(frameBitmap, presentationTimeNs)
-
-                // Drain encoder output
-                while (true) {
-                    val outIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
-                    if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        val newFormat = codec.outputFormat
-                        videoTrackIndex = muxer.addTrack(newFormat)
-                        muxer.start()
-                        muxerStarted = true
-                    } else if (outIndex >= 0) {
-                        val encodedData = codec.getOutputBuffer(outIndex)
-                        if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+            // Prepare Audio Extractor if audio format is present
+            if (audioTrackUri != null && audioSourceFormat != null) {
+                try {
+                    val extractor = MediaExtractor()
+                    extractor.setDataSource(context, audioTrackUri, null)
+                    for (i in 0 until extractor.trackCount) {
+                        val fmt = extractor.getTrackFormat(i)
+                        val mime = fmt.getString(MediaFormat.KEY_MIME) ?: ""
+                        if (mime.startsWith("audio/")) {
+                            extractor.selectTrack(i)
+                            audioExtractor = extractor
+                            break
                         }
-                        codec.releaseOutputBuffer(outIndex, false)
-                    } else {
-                        break
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 7. Multi-core Frame Rendering Pipeline (Utilizes Phone CPU cores & RAM)
+            onProgress(0.12f, "Allocating RAM pipeline and rendering clips...")
+
+            val audioBuf = ByteBuffer.allocate(1024 * 128)
+            val audioInfo = MediaCodec.BufferInfo()
+
+            // Batch rendering in parallel chunks across available processors
+            val batchSize = max(4, min(16, Runtime.getRuntime().availableProcessors() * 2))
+            var currentFrameIdx = 0
+
+            while (currentFrameIdx < totalFrames) {
+                val endFrameIdx = min(currentFrameIdx + batchSize, totalFrames)
+                val batchFrames = (currentFrameIdx until endFrameIdx).toList()
+
+                // Render batch concurrently using all CPU cores
+                val renderedBitmaps = coroutineScope {
+                    batchFrames.map { fIdx ->
+                        async(Dispatchers.Default) {
+                            val timeMs = fIdx * frameIntervalMs
+                            val bmp = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                            val canvas = Canvas(bmp)
+                            renderCompositionFrame(
+                                context = context,
+                                project = project,
+                                timeMs = timeMs,
+                                targetWidth = targetWidth,
+                                targetHeight = targetHeight,
+                                targetBitmap = bmp,
+                                canvas = canvas,
+                                retrievers = retrievers,
+                                typefaceCache = typefaceCache
+                            )
+                            Pair(fIdx, bmp)
+                        }
+                    }.awaitAll()
+                }
+
+                // Feed rendered bitmaps into EGL & MediaCodec sequentially
+                for ((fIdx, bmp) in renderedBitmaps) {
+                    val presentationTimeNs = (fIdx * frameIntervalMs) * 1_000_000L
+                    eglEnv.drawBitmap(bmp, presentationTimeNs)
+                    bmp.recycle()
+
+                    // Drain encoder output
+                    while (true) {
+                        val outIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
+                        if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                            val newVideoFormat = encoder.outputFormat
+                            videoTrackIndex = m.addTrack(newVideoFormat)
+
+                            // CRITICAL: Add Audio Track BEFORE starting Muxer
+                            if (audioSourceFormat != null) {
+                                try {
+                                    audioTrackIndex = m.addTrack(audioSourceFormat)
+                                } catch (_: Exception) {
+                                    audioTrackIndex = -1
+                                }
+                            }
+
+                            m.start()
+                            muxerStarted = true
+                        } else if (outIndex >= 0) {
+                            val encodedData = encoder.getOutputBuffer(outIndex)
+                            if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
+                                encodedData.position(bufferInfo.offset)
+                                encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                                m.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                                samplesWritten++
+                            }
+                            encoder.releaseOutputBuffer(outIndex, false)
+                        } else {
+                            break
+                        }
+                    }
+
+                    // Interleave audio samples up to current video time
+                    if (muxerStarted && audioTrackIndex >= 0 && audioExtractor != null) {
+                        val currentPtsUs = (fIdx * frameIntervalMs) * 1000L
+                        while (audioExtractor.sampleTime in 0..currentPtsUs) {
+                            audioBuf.clear()
+                            val sampleSize = audioExtractor.readSampleData(audioBuf, 0)
+                            if (sampleSize < 0) break
+                            audioInfo.offset = 0
+                            audioInfo.size = sampleSize
+                            audioInfo.presentationTimeUs = audioExtractor.sampleTime
+                            audioInfo.flags = audioExtractor.sampleFlags
+                            try {
+                                m.writeSampleData(audioTrackIndex, audioBuf, audioInfo)
+                            } catch (_: Exception) {}
+                            audioExtractor.advance()
+                        }
                     }
                 }
 
-                // Update real progress
-                val pct = 0.15f + (0.70f * (frameIdx.toFloat() / totalFrames))
-                onProgress(pct, "Rendering frame ${frameIdx + 1}/$totalFrames (${(pct * 100).toInt()}%)")
+                currentFrameIdx = endFrameIdx
+                val pct = 0.12f + (0.75f * (currentFrameIdx.toFloat() / totalFrames))
+                onProgress(pct, "Rendering clip frames: $currentFrameIdx/$totalFrames (${(pct * 100).toInt()}%)")
             }
 
-            // Signal end of stream
-            codec.signalEndOfInputStream()
+            // Signal End of Stream to Encoder
+            encoder.signalEndOfInputStream()
 
-            // Drain remaining frames
+            // Drain remaining frames from encoder
             var eos = false
             var drainCount = 0
-            while (!eos && drainCount < 50) {
+            while (!eos && drainCount < 80) {
                 drainCount++
-                val outIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                val outIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
                 if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     if (!muxerStarted) {
-                        videoTrackIndex = muxer.addTrack(codec.outputFormat)
-                        muxer.start()
+                        videoTrackIndex = m.addTrack(encoder.outputFormat)
+                        if (audioSourceFormat != null) {
+                            try { audioTrackIndex = m.addTrack(audioSourceFormat) } catch (_: Exception) {}
+                        }
+                        m.start()
                         muxerStarted = true
                     }
                 } else if (outIndex >= 0) {
-                    val encodedData = codec.getOutputBuffer(outIndex)
+                    val encodedData = encoder.getOutputBuffer(outIndex)
                     if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
                         encodedData.position(bufferInfo.offset)
                         encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                        muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                        m.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                        samplesWritten++
                     }
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         eos = true
                     }
-                    codec.releaseOutputBuffer(outIndex, false)
+                    encoder.releaseOutputBuffer(outIndex, false)
                 } else {
                     break
                 }
             }
 
-            // Clean up video encoder
-            try {
-                codec.stop()
-                codec.release()
-            } catch (_: Exception) {}
-            eglEnv.release()
-            frameBitmap.recycle()
-            retrievers.values.forEach { try { it.release() } catch (_: Exception) {} }
-
-            // Audio track muxing (from source video or audio tracks)
-            onProgress(0.88f, "Muxing audio tracks and background music...")
-            var audioTrackMuxed = false
-            for (clip in project.clips) {
-                if (clip.isLocalVideo && !clip.uriString.isNullOrBlank() && !audioTrackMuxed) {
+            // Finish any remaining audio samples up to total duration
+            if (muxerStarted && audioTrackIndex >= 0 && audioExtractor != null) {
+                onProgress(0.90f, "Finalizing synchronized audio stems...")
+                while (true) {
+                    audioBuf.clear()
+                    val sampleSize = audioExtractor.readSampleData(audioBuf, 0)
+                    if (sampleSize < 0 || audioExtractor.sampleTime > totalDurMs * 1000L) break
+                    audioInfo.offset = 0
+                    audioInfo.size = sampleSize
+                    audioInfo.presentationTimeUs = audioExtractor.sampleTime
+                    audioInfo.flags = audioExtractor.sampleFlags
                     try {
-                        val audioExtractor = MediaExtractor()
-                        audioExtractor.setDataSource(context, Uri.parse(clip.uriString), null)
-                        for (i in 0 until audioExtractor.trackCount) {
-                            val trackFormat = audioExtractor.getTrackFormat(i)
-                            val mime = trackFormat.getString(MediaFormat.KEY_MIME) ?: ""
-                            if (mime.startsWith("audio/")) {
-                                audioExtractor.selectTrack(i)
-                                val audioTrackIndex = muxer.addTrack(trackFormat)
-                                if (!muxerStarted) {
-                                    muxer.start()
-                                    muxerStarted = true
-                                }
-                                val audioBuf = ByteBuffer.allocate(1024 * 128)
-                                val aInfo = MediaCodec.BufferInfo()
-                                while (true) {
-                                    val sampleSize = audioExtractor.readSampleData(audioBuf, 0)
-                                    if (sampleSize < 0) break
-                                    aInfo.offset = 0
-                                    aInfo.size = sampleSize
-                                    aInfo.presentationTimeUs = audioExtractor.sampleTime
-                                    aInfo.flags = audioExtractor.sampleFlags
-                                    muxer.writeSampleData(audioTrackIndex, audioBuf, aInfo)
-                                    audioExtractor.advance()
-                                    if (audioExtractor.sampleTime > totalDurMs * 1000L) break
-                                }
-                                audioExtractor.release()
-                                audioTrackMuxed = true
-                                break
-                            }
-                        }
+                        m.writeSampleData(audioTrackIndex, audioBuf, audioInfo)
                     } catch (_: Exception) {}
+                    audioExtractor.advance()
                 }
             }
 
-            try {
-                if (muxerStarted) {
-                    muxer.stop()
+            // Safely stop and release hardware components
+            try { encoder.stop() } catch (_: Exception) {}
+            try { encoder.release() } catch (_: Exception) {}
+            codec = null
+
+            try { eglEnv.release() } catch (_: Exception) {}
+            eglEnv = null
+
+            try { audioExtractor?.release() } catch (_: Exception) {}
+            audioExtractor = null
+
+            retrievers.values.forEach { try { it.release() } catch (_: Exception) {} }
+            retrievers.clear()
+
+            // Safely stop Muxer only if it started and wrote samples
+            if (muxerStarted && samplesWritten > 0) {
+                try {
+                    m.stop()
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-                muxer.release()
-            } catch (_: Exception) {}
+            }
+            try { m.release() } catch (_: Exception) {}
+            muxer = null
 
-            onProgress(0.95f, "Saving exported video to Movies/Edit88...")
+            onProgress(0.96f, "Saving exported video to Movies/Edit88...")
 
-            // Save to MediaStore
+            // 8. Save to MediaStore Gallery
             val fileName = "Edit88_${System.currentTimeMillis() / 1000}_${resolution.label.split(" ").first()}_${fps.fps}fps.${format.extension}"
             val savedUri = saveFileToMediaStore(context, tempOutputFile, fileName, format)
 
-            onProgress(1.0f, "Saved to device: Movies/Edit88")
+            onProgress(1.0f, "Saved directly to device gallery: Movies/Edit88")
             return@withContext savedUri
         } catch (e: Exception) {
             e.printStackTrace()
-            // Graceful fallback to raw copy if hardware encoder fails
+            // Clean up
+            try { codec?.stop() } catch (_: Exception) {}
+            try { codec?.release() } catch (_: Exception) {}
+            try { muxer?.release() } catch (_: Exception) {}
+            try { eglEnv?.release() } catch (_: Exception) {}
+            try { audioExtractor?.release() } catch (_: Exception) {}
+            retrievers.values.forEach { try { it.release() } catch (_: Exception) {} }
+
+            // Fallback copy if catastrophic encoder failure
             return@withContext fallbackCopy(context, project, format)
         } finally {
             try { tempOutputFile.delete() } catch (_: Exception) {}
@@ -305,70 +430,99 @@ object VideoExportEngine {
         retrievers: Map<String, MediaMetadataRetriever>,
         typefaceCache: Map<UrduFontChoice, Typeface>
     ) {
-        // 1. Locate active MediaClip at timeMs
+        // 1. Locate active MediaClip and check transitions
         var accumulatedMs = 0L
         var activeClip: MediaClip? = null
+        var nextClip: MediaClip? = null
         var clipLocalOffsetMs = 0L
+        var transitionProgress = 0f
+        var activeTransition = TransitionType.NONE
 
-        for (c in project.clips) {
+        val clips = project.clips
+        for (i in clips.indices) {
+            val c = clips[i]
             val dur = c.effectiveDurationMs
-            if (timeMs in accumulatedMs until (accumulatedMs + dur)) {
+            val clipStart = accumulatedMs
+            val clipEnd = accumulatedMs + dur
+
+            if (timeMs in clipStart until clipEnd) {
                 activeClip = c
-                clipLocalOffsetMs = (((timeMs - accumulatedMs) * c.speed).toLong() + c.startTrimMs).coerceAtLeast(0L)
+                val elapsedInClip = timeMs - clipStart
+                clipLocalOffsetMs = ((elapsedInClip * c.speed).toLong() + c.startTrimMs).coerceIn(c.startTrimMs, c.endTrimMs)
+
+                // Check for transition to next clip
+                if (c.transitionToNext != TransitionType.NONE && i < clips.size - 1) {
+                    val transDur = c.transitionDurationMs.coerceAtMost(dur / 2)
+                    val transStart = clipEnd - transDur
+                    if (timeMs >= transStart) {
+                        activeTransition = c.transitionToNext
+                        nextClip = clips[i + 1]
+                        transitionProgress = ((timeMs - transStart).toFloat() / transDur).coerceIn(0f, 1f)
+                    }
+                }
                 break
             }
             accumulatedMs += dur
         }
-        if (activeClip == null && project.clips.isNotEmpty()) {
-            activeClip = project.clips.last()
+
+        if (activeClip == null && clips.isNotEmpty()) {
+            activeClip = clips.last()
         }
 
-        // 2. Draw Base Video Frame or Procedural Background
-        var drewRealVideo = false
-        if (activeClip != null && activeClip.isLocalVideo && retrievers.containsKey(activeClip.id)) {
-            val retriever = retrievers[activeClip.id]
-            if (retriever != null) {
-                try {
-                    val frame = retriever.getFrameAtTime(clipLocalOffsetMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                        ?: retriever.getFrameAtTime(clipLocalOffsetMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
-                    if (frame != null) {
-                        val srcRect = Rect(0, 0, frame.width, frame.height)
-                        val dstRect = Rect(0, 0, targetWidth, targetHeight)
-                        canvas.drawBitmap(frame, srcRect, dstRect, null)
-                        drewRealVideo = true
-                    }
-                } catch (_: Exception) {}
-            }
-        }
+        // 2. Draw Video Frame or Procedural Background
+        drawSingleClipFrame(
+            clip = activeClip,
+            clipOffsetMs = clipLocalOffsetMs,
+            retrievers = retrievers,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            canvas = canvas,
+            timeMs = timeMs
+        )
 
-        if (!drewRealVideo) {
-            // Procedural background matching scene theme
-            val p1 = activeClip?.primaryColorHex?.toInt() ?: 0xFF1E293B.toInt()
-            val p2 = activeClip?.secondaryColorHex?.toInt() ?: 0xFF0F172A.toInt()
-            val bgPaint = Paint().apply {
-                color = when (activeClip?.filter) {
-                    FilterType.CYBERPUNK -> 0xFF1E1035.toInt()
-                    FilterType.CINEMATIC -> 0xFF041C24.toInt()
-                    FilterType.RETRO -> 0xFF2C1810.toInt()
-                    FilterType.MONO -> 0xFF111111.toInt()
-                    FilterType.WARM -> 0xFF3B1E08.toInt()
-                    FilterType.COLD -> 0xFF082F49.toInt()
-                    else -> p1
+        // 3. Render Transitions if active
+        if (nextClip != null && activeTransition != TransitionType.NONE && transitionProgress > 0f) {
+            when (activeTransition) {
+                TransitionType.DISSOLVE -> {
+                    // Alpha crossfade with next clip
+                    val nextBmp = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                    val nextCanvas = Canvas(nextBmp)
+                    drawSingleClipFrame(nextClip, nextClip.startTrimMs, retrievers, targetWidth, targetHeight, nextCanvas, timeMs)
+                    val p = Paint().apply { alpha = (transitionProgress * 255).toInt() }
+                    canvas.drawBitmap(nextBmp, 0f, 0f, p)
+                    nextBmp.recycle()
                 }
+                TransitionType.FLASH_WHITE -> {
+                    val alpha = if (transitionProgress < 0.5f) {
+                        (transitionProgress * 2f * 255).toInt()
+                    } else {
+                        ((1f - transitionProgress) * 2f * 255).toInt()
+                    }
+                    val p = Paint().apply { color = Color.argb(alpha, 255, 255, 255) }
+                    canvas.drawRect(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat(), p)
+                }
+                TransitionType.FLASH_BLACK -> {
+                    val alpha = if (transitionProgress < 0.5f) {
+                        (transitionProgress * 2f * 255).toInt()
+                    } else {
+                        ((1f - transitionProgress) * 2f * 255).toInt()
+                    }
+                    val p = Paint().apply { color = Color.argb(alpha, 0, 0, 0) }
+                    canvas.drawRect(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat(), p)
+                }
+                TransitionType.WHIP_LEFT -> {
+                    val offset = (transitionProgress * targetWidth).toInt()
+                    val nextBmp = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                    val nextCanvas = Canvas(nextBmp)
+                    drawSingleClipFrame(nextClip, nextClip.startTrimMs, retrievers, targetWidth, targetHeight, nextCanvas, timeMs)
+                    canvas.drawBitmap(nextBmp, (targetWidth - offset).toFloat(), 0f, null)
+                    nextBmp.recycle()
+                }
+                else -> {}
             }
-            canvas.drawRect(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat(), bgPaint)
-
-            val gradPaint = Paint().apply {
-                shader = RadialGradient(
-                    targetWidth / 2f, targetHeight / 2f,
-                    max(targetWidth, targetHeight) * 0.75f,
-                    p2, Color.TRANSPARENT, Shader.TileMode.CLAMP
-                )
-            }
-            canvas.drawRect(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat(), gradPaint)
         }
 
-        // 3. Apply Color Grading & Filter Adjustments
+        // 4. Apply Color Grading, LUTs & Filter Adjustments
         val grading = activeClip?.colorGrading
         val filter = activeClip?.filter ?: FilterType.NONE
 
@@ -437,7 +591,7 @@ object VideoExportEngine {
             }
         }
 
-        // 4. Draw Active Overlays / Stickers
+        // 5. Draw Active Overlays / Stickers
         for (overlay in project.overlays) {
             if (timeMs in overlay.startTimeMs..(overlay.startTimeMs + overlay.durationMs)) {
                 val ox = overlay.posX * targetWidth
@@ -453,7 +607,7 @@ object VideoExportEngine {
             }
         }
 
-        // 5. Draw Active Subtitle with Urdu Nastaliq & Karaoke Highlighting
+        // 6. Draw Active Subtitle with Urdu Nastaliq & Karaoke Highlighting
         val activeSubtitle = project.subtitles.find { timeMs in it.startMs..it.endMs }
         if (activeSubtitle != null) {
             drawBurnedInSubtitle(
@@ -467,6 +621,70 @@ object VideoExportEngine {
         }
     }
 
+    private fun drawSingleClipFrame(
+        clip: MediaClip?,
+        clipOffsetMs: Long,
+        retrievers: Map<String, MediaMetadataRetriever>,
+        targetWidth: Int,
+        targetHeight: Int,
+        canvas: Canvas,
+        timeMs: Long
+    ) {
+        var drewRealVideo = false
+        if (clip != null && clip.isLocalVideo && retrievers.containsKey(clip.id)) {
+            val retriever = retrievers[clip.id]
+            if (retriever != null) {
+                try {
+                    // Use OPTION_CLOSEST for butter-smooth frame-by-frame decoding
+                    val timeUs = clipOffsetMs * 1000L
+                    val frame: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                        try {
+                            retriever.getScaledFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST, targetWidth, targetHeight)
+                        } catch (_: Exception) {
+                            retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                        }
+                    } else {
+                        retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                    }
+
+                    if (frame != null) {
+                        val srcRect = Rect(0, 0, frame.width, frame.height)
+                        val dstRect = Rect(0, 0, targetWidth, targetHeight)
+                        canvas.drawBitmap(frame, srcRect, dstRect, null)
+                        drewRealVideo = true
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        if (!drewRealVideo) {
+            // Procedural animated background matching scene theme
+            val p1 = clip?.primaryColorHex?.toInt() ?: 0xFF1E293B.toInt()
+            val p2 = clip?.secondaryColorHex?.toInt() ?: 0xFF0F172A.toInt()
+            val bgPaint = Paint().apply {
+                color = when (clip?.filter) {
+                    FilterType.CYBERPUNK -> 0xFF1E1035.toInt()
+                    FilterType.CINEMATIC -> 0xFF041C24.toInt()
+                    FilterType.RETRO -> 0xFF2C1810.toInt()
+                    FilterType.MONO -> 0xFF111111.toInt()
+                    FilterType.WARM -> 0xFF3B1E08.toInt()
+                    FilterType.COLD -> 0xFF082F49.toInt()
+                    else -> p1
+                }
+            }
+            canvas.drawRect(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat(), bgPaint)
+
+            val gradPaint = Paint().apply {
+                shader = RadialGradient(
+                    targetWidth / 2f, targetHeight / 2f,
+                    max(targetWidth, targetHeight) * 0.75f,
+                    p2, Color.TRANSPARENT, Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawRect(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat(), gradPaint)
+        }
+    }
+
     private fun drawBurnedInSubtitle(
         canvas: Canvas,
         subtitle: SubtitleClip,
@@ -475,7 +693,6 @@ object VideoExportEngine {
         targetHeight: Int,
         typefaceCache: Map<UrduFontChoice, Typeface>
     ) {
-        // Resolve Typeface
         val tf = if (!subtitle.customFontPath.isNullOrBlank()) {
             try {
                 Typeface.createFromFile(subtitle.customFontPath)
@@ -488,7 +705,7 @@ object VideoExportEngine {
 
         // Movie-style responsive sizing proportional to video height
         val baseScale = targetHeight / 720f
-        val fontSizePx = subtitle.fontSizeSp * baseScale * subtitle.scale * 1.6f
+        val fontSizePx = subtitle.fontSizeSp * baseScale * subtitle.scale * 1.5f
 
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = tf
@@ -510,7 +727,6 @@ object VideoExportEngine {
 
         val words = subtitle.words
         if (words.isNotEmpty()) {
-            // Measure words for full background pill and karaoke coloring
             var totalWordsWidth = 0f
             val wordWidths = words.map { w ->
                 val width = textPaint.measureText(w.word)
@@ -524,7 +740,7 @@ object VideoExportEngine {
             val padX = 28f * baseScale
             val padY = 16f * baseScale
             val pillWidth = totalWordsWidth + (padX * 2)
-            val pillHeight = fontSizePx * 1.7f + (padY * 2)
+            val pillHeight = fontSizePx * 1.75f + (padY * 2)
 
             val pillLeft = (cx - (pillWidth / 2f)).coerceAtLeast(10f)
             val pillRight = (pillLeft + pillWidth).coerceAtMost(targetWidth - 10f)
@@ -542,7 +758,6 @@ object VideoExportEngine {
             val cornerRadius = 14f * baseScale
             canvas.drawRoundRect(pillRect, cornerRadius, cornerRadius, bgPaint)
 
-            // Draw border if requested
             if (subtitle.outlineWidthDp > 0f) {
                 val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = subtitle.outlineColorHex.toInt()
@@ -554,7 +769,7 @@ object VideoExportEngine {
 
             // Draw each word right-to-left (RTL)
             val baselineY = cy + (fontSizePx * 0.45f)
-            var currentX = pillRight - padX // Start from right edge for Urdu RTL
+            var currentX = pillRight - padX
 
             words.forEachIndexed { idx, timedWord ->
                 val wWidth = wordWidths[idx]
@@ -563,12 +778,10 @@ object VideoExportEngine {
                 val isActive = timeMs in timedWord.startOffsetMs..timedWord.endOffsetMs
                 val wordCol = if (isActive) subtitle.activeColorHex.toInt() else subtitle.textColorHex.toInt()
 
-                // Outline
                 if (subtitle.outlineWidthDp > 0f) {
                     canvas.drawText(timedWord.word, wordCenterX, baselineY, outlinePaint)
                 }
 
-                // Fill text
                 textPaint.color = wordCol
                 textPaint.isFakeBoldText = isActive
                 canvas.drawText(timedWord.word, wordCenterX, baselineY, textPaint)
@@ -576,12 +789,11 @@ object VideoExportEngine {
                 currentX -= (wWidth + spacingPx)
             }
         } else {
-            // Full text single line
             val measuredTextWidth = textPaint.measureText(subtitle.text)
             val padX = 28f * baseScale
             val padY = 16f * baseScale
             val pillWidth = measuredTextWidth + (padX * 2)
-            val pillHeight = fontSizePx * 1.7f + (padY * 2)
+            val pillHeight = fontSizePx * 1.75f + (padY * 2)
 
             val pillLeft = (cx - (pillWidth / 2f)).coerceAtLeast(10f)
             val pillRight = (pillLeft + pillWidth).coerceAtMost(targetWidth - 10f)
@@ -607,32 +819,79 @@ object VideoExportEngine {
         }
     }
 
-    private fun getDimensions(res: ExportResolution, aspect: AspectRatioType): Pair<Int, Int> {
-        val base = when (res) {
-            ExportResolution.P480 -> 480
-            ExportResolution.P720 -> 720
-            ExportResolution.P1080 -> 1080
-            ExportResolution.P2K -> 1440
-            ExportResolution.P4K -> 2160
+    private fun getSafeEncoderDimensions(res: ExportResolution, aspect: AspectRatioType, encoder: MediaCodec): Pair<Int, Int> {
+        val mimeType = MediaFormat.MIMETYPE_VIDEO_AVC
+        val caps = try {
+            encoder.codecInfo.getCapabilitiesForType(mimeType).videoCapabilities
+        } catch (_: Exception) {
+            null
         }
-        val (w, h) = when (aspect) {
-            AspectRatioType.RATIO_9_16 -> Pair(base, (base * 16) / 9)
-            AspectRatioType.RATIO_16_9 -> Pair((base * 16) / 9, base)
-            AspectRatioType.RATIO_1_1 -> Pair(base, base)
-            AspectRatioType.RATIO_4_5 -> Pair(base, (base * 5) / 4)
+
+        var (w, h) = when (aspect) {
+            AspectRatioType.RATIO_9_16 -> when (res) {
+                ExportResolution.P480 -> Pair(480, 864)
+                ExportResolution.P720 -> Pair(720, 1280)
+                ExportResolution.P1080 -> Pair(1088, 1920)
+                ExportResolution.P2K -> Pair(1088, 1920)
+                ExportResolution.P4K -> Pair(1088, 1920)
+            }
+            AspectRatioType.RATIO_16_9 -> when (res) {
+                ExportResolution.P480 -> Pair(864, 480)
+                ExportResolution.P720 -> Pair(1280, 720)
+                ExportResolution.P1080 -> Pair(1920, 1088)
+                ExportResolution.P2K -> Pair(1920, 1088)
+                ExportResolution.P4K -> Pair(1920, 1088)
+            }
+            AspectRatioType.RATIO_1_1 -> when (res) {
+                ExportResolution.P480 -> Pair(480, 480)
+                ExportResolution.P720 -> Pair(720, 720)
+                else -> Pair(1088, 1088)
+            }
+            AspectRatioType.RATIO_4_5 -> when (res) {
+                ExportResolution.P480 -> Pair(480, 592)
+                ExportResolution.P720 -> Pair(720, 896)
+                else -> Pair(864, 1088)
+            }
         }
-        // Ensure even dimensions for video codecs
-        return Pair(w - (w % 2), h - (h % 2))
+
+        // Align strictly to 16
+        w = (w / 16) * 16
+        h = (h / 16) * 16
+
+        if (caps != null) {
+            val widthAlign = caps.widthAlignment.coerceAtLeast(2)
+            val heightAlign = caps.heightAlignment.coerceAtLeast(2)
+            val maxW = caps.supportedWidths.upper
+            val maxH = caps.supportedHeights.upper
+            val minW = caps.supportedWidths.lower
+            val minH = caps.supportedHeights.lower
+
+            w = w.coerceIn(minW, maxW)
+            h = h.coerceIn(minH, maxH)
+            w -= (w % widthAlign)
+            h -= (h % heightAlign)
+
+            if (!caps.isSizeSupported(w, h)) {
+                if (aspect == AspectRatioType.RATIO_16_9) {
+                    w = 1280
+                    h = 720
+                } else {
+                    w = 720
+                    h = 1280
+                }
+            }
+        }
+        return Pair(w, h)
     }
 
     private fun getBitrateBps(res: ExportResolution, fps: ExportFps): Int {
         val mbps = when (res) {
-            ExportResolution.P480 -> 3.0f
-            ExportResolution.P720 -> 6.5f
-            ExportResolution.P1080 -> 14.0f
+            ExportResolution.P480 -> 3.5f
+            ExportResolution.P720 -> 8.0f
+            ExportResolution.P1080 -> 16.0f
             ExportResolution.P2K -> 24.0f
-            ExportResolution.P4K -> 45.0f
-        } * (if (fps == ExportFps.FPS_60) 1.4f else 1.0f)
+            ExportResolution.P4K -> 35.0f
+        } * (if (fps == ExportFps.FPS_60) 1.35f else 1.0f)
         return (mbps * 1_000_000).toInt()
     }
 
@@ -717,7 +976,7 @@ object VideoExportEngine {
 }
 
 /**
- * Lightweight EGL & OpenGL ES 2.0 Renderer to feed Bitmaps into MediaCodec's input Surface
+ * Robust EGL & OpenGL ES 2.0 Renderer with emulator/device fallback
  */
 private class EGLRenderer(surface: Surface, private val width: Int, private val height: Int) {
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
@@ -780,7 +1039,20 @@ private class EGLRenderer(surface: Surface, private val width: Int, private val 
         val configs = arrayOfNulls<EGLConfig>(1)
         val numConfigs = IntArray(1)
         EGL14.eglChooseConfig(eglDisplay, attribList, 0, configs, 0, configs.size, numConfigs, 0)
-        val config = configs[0]
+        var config = configs[0]
+
+        if (config == null) {
+            val fallbackAttribList = intArrayOf(
+                EGL14.EGL_RED_SIZE, 8,
+                EGL14.EGL_GREEN_SIZE, 8,
+                EGL14.EGL_BLUE_SIZE, 8,
+                EGL14.EGL_ALPHA_SIZE, 8,
+                EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                EGL14.EGL_NONE
+            )
+            EGL14.eglChooseConfig(eglDisplay, fallbackAttribList, 0, configs, 0, configs.size, numConfigs, 0)
+            config = configs[0]
+        }
 
         val contextAttribs = intArrayOf(
             EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,

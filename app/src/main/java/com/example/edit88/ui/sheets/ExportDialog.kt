@@ -77,19 +77,33 @@ fun getBitrateMbps(res: ExportResolution, fps: ExportFps): Float {
 }
 
 fun getResolutionDimensions(res: ExportResolution, aspect: AspectRatioType): Pair<Int, Int> {
-    val base = when (res) {
-        ExportResolution.P480 -> 480
-        ExportResolution.P720 -> 720
-        ExportResolution.P1080 -> 1080
-        ExportResolution.P2K -> 1440
-        ExportResolution.P4K -> 2160
+    val (w, h) = when (aspect) {
+        AspectRatioType.RATIO_9_16 -> when (res) {
+            ExportResolution.P480 -> Pair(480, 864)
+            ExportResolution.P720 -> Pair(720, 1280)
+            ExportResolution.P1080 -> Pair(1088, 1920)
+            ExportResolution.P2K -> Pair(1088, 1920)
+            ExportResolution.P4K -> Pair(1088, 1920)
+        }
+        AspectRatioType.RATIO_16_9 -> when (res) {
+            ExportResolution.P480 -> Pair(864, 480)
+            ExportResolution.P720 -> Pair(1280, 720)
+            ExportResolution.P1080 -> Pair(1920, 1088)
+            ExportResolution.P2K -> Pair(1920, 1088)
+            ExportResolution.P4K -> Pair(1920, 1088)
+        }
+        AspectRatioType.RATIO_1_1 -> when (res) {
+            ExportResolution.P480 -> Pair(480, 480)
+            ExportResolution.P720 -> Pair(720, 720)
+            else -> Pair(1088, 1088)
+        }
+        AspectRatioType.RATIO_4_5 -> when (res) {
+            ExportResolution.P480 -> Pair(480, 592)
+            ExportResolution.P720 -> Pair(720, 896)
+            else -> Pair(864, 1088)
+        }
     }
-    return when (aspect) {
-        AspectRatioType.RATIO_9_16 -> Pair(base, (base * 16) / 9)
-        AspectRatioType.RATIO_16_9 -> Pair((base * 16) / 9, base)
-        AspectRatioType.RATIO_1_1 -> Pair(base, base)
-        AspectRatioType.RATIO_4_5 -> Pair(base, (base * 5) / 4)
-    }
+    return Pair((w / 16) * 16, (h / 16) * 16)
 }
 
 fun formatExportSize(durationMs: Long, bitrateMbps: Float): String {
@@ -173,7 +187,7 @@ fun ExportDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var selectedRes by remember { mutableStateOf(ExportResolution.P1080) }
+    var selectedRes by remember { mutableStateOf(ExportResolution.P720) }
     var selectedFps by remember { mutableStateOf(ExportFps.FPS_30) }
     var selectedFormat by remember { mutableStateOf(ExportFormat.MP4) }
 
