@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Edit88"
+rootProject.name = "MultiDrive"
 
 include(":app")

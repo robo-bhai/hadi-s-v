@@ -1,6 +1,6 @@
 {
-  "name": "Edit88",
-  "description": "Professional AI-powered video editor with multi-track timeline, Urdu Nastaliq typography, auto-captions, and Gemini creative tools.",
+  "name": "MultiDrive",
+  "description": "Multi-Account Google Drive file manager with account-as-folder navigation, file uploads, and downloads.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
