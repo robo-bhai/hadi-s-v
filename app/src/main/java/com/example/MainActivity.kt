@@ -1,5 +1,6 @@
 package com.example
 
+import android.app.Activity
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
@@ -15,9 +16,16 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FolderShared
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,16 +34,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.DriveFile
+import com.example.data.model.HomeNavTab
 import com.example.ui.components.AddAccountDialog
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.components.FileDetailsBottomSheet
 import com.example.ui.components.NewFolderDialog
+import com.example.ui.components.PhotoViewerDialog
 import com.example.ui.components.RenameFileDialog
 import com.example.ui.screens.AccountFolderScreen
 import com.example.ui.screens.FileBrowserScreen
+import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.MultiDriveTheme
 import com.example.ui.viewmodel.DriveDialogType
 import com.example.ui.viewmodel.DriveViewModel
@@ -58,6 +70,7 @@ fun MultiDriveApp(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val activity = context as? Activity
     val snackbarHostState = remember { SnackbarHostState() }
 
     // State for pending download target file
@@ -111,7 +124,28 @@ fun MultiDriveApp(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        bottomBar = {
+            // Show bottom navigation bar with Home and Accounts tabs when not deep inside a specific account's Drive
+            if (uiState.activeAccount == null) {
+                NavigationBar(modifier = Modifier.testTag("bottom_nav_bar")) {
+                    NavigationBarItem(
+                        selected = uiState.currentTab == HomeNavTab.HOME,
+                        onClick = { viewModel.setNavTab(HomeNavTab.HOME) },
+                        icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
+                        label = { Text("Home") },
+                        modifier = Modifier.testTag("nav_tab_home")
+                    )
+                    NavigationBarItem(
+                        selected = uiState.currentTab == HomeNavTab.ACCOUNTS,
+                        onClick = { viewModel.setNavTab(HomeNavTab.ACCOUNTS) },
+                        icon = { Icon(Icons.Filled.FolderShared, contentDescription = "Accounts") },
+                        label = { Text("Accounts") },
+                        modifier = Modifier.testTag("nav_tab_accounts")
+                    )
+                }
+            }
+        }
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -120,25 +154,8 @@ fun MultiDriveApp(
         ) {
             val activeAccount = uiState.activeAccount
 
-            if (activeAccount == null) {
-                // Screen 1: Account-as-Folder Architecture Root Screen
-                AccountFolderScreen(
-                    accounts = uiState.accounts,
-                    onAccountSelected = { account ->
-                        viewModel.openAccountRoot(account)
-                    },
-                    onAddAccountClicked = {
-                        viewModel.showDialog(DriveDialogType.AddAccount)
-                    },
-                    onRemoveAccountClicked = { accountId ->
-                        viewModel.removeAccount(accountId)
-                    },
-                    onRefreshClicked = {
-                        viewModel.refresh()
-                    }
-                )
-            } else {
-                // Screen 2: Google Drive File Browser with drill-down folders
+            if (activeAccount != null) {
+                // Screen 3: Google Drive File Browser with drill-down subfolders
                 FileBrowserScreen(
                     account = activeAccount,
                     folderStack = uiState.folderStack,
@@ -162,7 +179,6 @@ fun MultiDriveApp(
                     },
                     onDownloadFile = { file ->
                         pendingDownloadFile = file
-                        // Prompt user where to save file
                         saveFileLauncher.launch(file.name)
                     },
                     onMoreOptionsClicked = { file ->
@@ -195,6 +211,78 @@ fun MultiDriveApp(
                         viewModel.refresh()
                     }
                 )
+            } else {
+                when (uiState.currentTab) {
+                    HomeNavTab.HOME -> {
+                        // Screen 1: Home Tab with Videos and Photos buttons across all accounts
+                        HomeScreen(
+                            mediaFiles = uiState.filteredCrossAccountMedia,
+                            selectedFilter = uiState.homeMediaFilter,
+                            cachedPhotosCount = uiState.cachedPhotosCount,
+                            cachedSizeFormatted = uiState.cachedSizeFormatted,
+                            searchQuery = uiState.searchQuery,
+                            onFilterSelected = { filter ->
+                                viewModel.setHomeMediaFilter(filter)
+                            },
+                            onSearchQueryChanged = { query ->
+                                viewModel.setSearchQuery(query)
+                            },
+                            onPhotoClicked = { photoMedia ->
+                                viewModel.setViewingPhoto(photoMedia)
+                            },
+                            onFileClicked = { file ->
+                                viewModel.showDialog(DriveDialogType.FileDetails(file))
+                            },
+                            onDownloadFile = { file ->
+                                pendingDownloadFile = file
+                                saveFileLauncher.launch(file.name)
+                            },
+                            onToggleCache = { fileId ->
+                                viewModel.toggleCacheItem(fileId)
+                            },
+                            onClearCache = {
+                                viewModel.clearMediaCache()
+                            },
+                            onRefresh = {
+                                viewModel.refresh()
+                            }
+                        )
+                    }
+
+                    HomeNavTab.ACCOUNTS -> {
+                        // Screen 2: Accounts Tab (Account-as-Folder Architecture)
+                        AccountFolderScreen(
+                            accounts = uiState.accounts,
+                            onAccountSelected = { account ->
+                                viewModel.openAccountRoot(account)
+                            },
+                            onAddAccountClicked = {
+                                viewModel.showDialog(DriveDialogType.AddAccount)
+                            },
+                            onRemoveAccountClicked = { accountId ->
+                                viewModel.removeAccount(accountId)
+                            },
+                            onRefreshClicked = {
+                                viewModel.refresh()
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Full Screen Photo Viewer Dialog
+            uiState.viewingPhoto?.let { photoMedia ->
+                PhotoViewerDialog(
+                    media = photoMedia,
+                    onDismiss = { viewModel.setViewingPhoto(null) },
+                    onDownload = {
+                        pendingDownloadFile = photoMedia.file
+                        saveFileLauncher.launch(photoMedia.file.name)
+                    },
+                    onToggleCache = {
+                        viewModel.toggleCacheItem(photoMedia.file.id)
+                    }
+                )
             }
 
             // Dialogs & Sheets
@@ -203,7 +291,9 @@ fun MultiDriveApp(
                     AddAccountDialog(
                         onDismiss = { viewModel.dismissDialog() },
                         onSignInCredentialManager = {
-                            viewModel.signInWithCredentialManager()
+                            if (activity != null) {
+                                viewModel.signInWithCredentialManager(activity)
+                            }
                         },
                         onAddCustomAccount = { email, name, token, isDemo ->
                             viewModel.addAccount(email, name, token, isDemo)

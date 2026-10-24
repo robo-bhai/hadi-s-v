@@ -52,4 +52,28 @@ class ExampleRobolectricTest {
         assertEquals(FileCategory.DOCUMENT, pdf.category)
         assertEquals("2.0 MB", pdf.formattedSize)
     }
+
+    @Test
+    fun `test cross account media and cache stats`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = com.example.data.repository.GoogleDriveRepository(context)
+        val videos = repo.getAllFilesAcrossAccounts(com.example.data.model.HomeMediaFilter.VIDEOS)
+        assertTrue(videos.isNotEmpty())
+        assertEquals(com.example.data.model.FileCategory.VIDEO, videos[0].file.category)
+
+        val photos = repo.getAllFilesAcrossAccounts(com.example.data.model.HomeMediaFilter.PHOTOS)
+        assertTrue(photos.isNotEmpty())
+        assertEquals(com.example.data.model.FileCategory.IMAGE, photos[0].file.category)
+
+        val statsInitial = repo.getCacheStats()
+        assertEquals(0, statsInitial.first)
+
+        repo.toggleCache(photos[0].file.id)
+        val statsAfter = repo.getCacheStats()
+        assertEquals(1, statsAfter.first)
+
+        repo.clearCache()
+        val statsCleared = repo.getCacheStats()
+        assertEquals(0, statsCleared.first)
+    }
 }

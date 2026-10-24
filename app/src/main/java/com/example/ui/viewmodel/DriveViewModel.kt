@@ -1,13 +1,17 @@
 package com.example.ui.viewmodel
 
+import android.app.Activity
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.auth.GoogleAuthManager
+import com.example.data.model.AccountMediaFile
 import com.example.data.model.DriveAccount
 import com.example.data.model.DriveFile
 import com.example.data.model.FileCategory
+import com.example.data.model.HomeMediaFilter
+import com.example.data.model.HomeNavTab
 import com.example.data.model.SortOption
 import com.example.data.model.ViewMode
 import com.example.data.repository.GoogleDriveRepository
@@ -28,6 +32,12 @@ sealed interface DriveDialogType {
 }
 
 data class DriveUiState(
+    val currentTab: HomeNavTab = HomeNavTab.HOME,
+    val homeMediaFilter: HomeMediaFilter = HomeMediaFilter.ALL,
+    val crossAccountMedia: List<AccountMediaFile> = emptyList(),
+    val cachedPhotosCount: Int = 0,
+    val cachedSizeFormatted: String = "0.0 MB",
+    val viewingPhoto: AccountMediaFile? = null,
     val accounts: List<DriveAccount> = emptyList(),
     val activeAccount: DriveAccount? = null,
     val folderStack: List<DriveFile> = emptyList(),
@@ -51,18 +61,15 @@ data class DriveUiState(
         get() {
             var list = rawFiles
 
-            // Filter category
             if (selectedCategory != FileCategory.ALL) {
                 list = list.filter { it.category == selectedCategory }
             }
 
-            // Search query
             if (searchQuery.isNotBlank()) {
                 val query = searchQuery.trim().lowercase(Locale.ROOT)
                 list = list.filter { it.name.lowercase(Locale.ROOT).contains(query) }
             }
 
-            // Sort
             return when (sortOption) {
                 SortOption.NAME_ASC -> list.sortedWith(
                     compareByDescending<DriveFile> { it.isFolder }.thenBy { it.name.lowercase(Locale.ROOT) }
@@ -81,6 +88,16 @@ data class DriveUiState(
                 )
             }
         }
+
+    val filteredCrossAccountMedia: List<AccountMediaFile>
+        get() {
+            if (searchQuery.isBlank()) return crossAccountMedia
+            val query = searchQuery.trim().lowercase(Locale.ROOT)
+            return crossAccountMedia.filter {
+                it.file.name.lowercase(Locale.ROOT).contains(query) ||
+                it.account.email.lowercase(Locale.ROOT).contains(query)
+            }
+        }
 }
 
 class DriveViewModel(application: Application) : AndroidViewModel(application) {
@@ -93,6 +110,8 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadAccounts()
+        loadCrossAccountMedia()
+        updateCacheStats()
     }
 
     fun loadAccounts() {
@@ -100,9 +119,63 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(accounts = list) }
     }
 
+    fun setNavTab(tab: HomeNavTab) {
+        _uiState.update { it.copy(currentTab = tab, searchQuery = "") }
+        if (tab == HomeNavTab.HOME) {
+            loadCrossAccountMedia()
+        }
+    }
+
+    fun setHomeMediaFilter(filter: HomeMediaFilter) {
+        _uiState.update { it.copy(homeMediaFilter = filter) }
+        loadCrossAccountMedia(filter)
+    }
+
+    fun loadCrossAccountMedia(filter: HomeMediaFilter = _uiState.value.homeMediaFilter) {
+        viewModelScope.launch {
+            val media = repository.getAllFilesAcrossAccounts(filter)
+            _uiState.update { it.copy(crossAccountMedia = media) }
+            updateCacheStats()
+        }
+    }
+
+    fun updateCacheStats() {
+        val stats = repository.getCacheStats()
+        _uiState.update {
+            it.copy(
+                cachedPhotosCount = stats.first,
+                cachedSizeFormatted = stats.second
+            )
+        }
+    }
+
+    fun clearMediaCache() {
+        val message = repository.clearCache()
+        loadCrossAccountMedia()
+        _uiState.update {
+            it.copy(
+                infoMessage = message
+            )
+        }
+    }
+
+    fun toggleCacheItem(fileId: String) {
+        val added = repository.toggleCache(fileId)
+        loadCrossAccountMedia()
+        _uiState.update {
+            it.copy(
+                infoMessage = if (added) "Cached locally for offline preview" else "Removed from local cache"
+            )
+        }
+    }
+
+    fun setViewingPhoto(photo: AccountMediaFile?) {
+        _uiState.update { it.copy(viewingPhoto = photo) }
+    }
+
     /**
      * Account-as-Folder navigation:
-     * User taps an account root folder on the home screen.
+     * User taps an account root folder on the accounts screen.
      */
     fun openAccountRoot(account: DriveAccount) {
         _uiState.update {
@@ -156,11 +229,6 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Tapping a specific crumb in the breadcrumb trail.
-     * index == -1 -> root ("My Drive")
-     * index >= 0 -> folder at that position in folderStack
-     */
     fun navigateToBreadcrumb(index: Int) {
         if (index < 0) {
             _uiState.update { it.copy(folderStack = emptyList()) }
@@ -176,6 +244,7 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
             loadCurrentFolderFiles()
         } else {
             loadAccounts()
+            loadCrossAccountMedia()
         }
     }
 
@@ -243,6 +312,7 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 loadCurrentFolderFiles()
+                loadCrossAccountMedia()
             }.onFailure { ex ->
                 _uiState.update {
                     it.copy(
@@ -255,7 +325,9 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadFile(file: DriveFile, destinationUri: Uri?) {
-        val account = _uiState.value.activeAccount ?: return
+        val account = _uiState.value.activeAccount
+            ?: _uiState.value.crossAccountMedia.find { it.file.id == file.id }?.account
+            ?: _uiState.value.accounts.firstOrNull() ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val result = repository.downloadFile(account, file, destinationUri)
@@ -278,7 +350,9 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun renameFile(file: DriveFile, newName: String) {
-        val account = _uiState.value.activeAccount ?: return
+        val account = _uiState.value.activeAccount
+            ?: _uiState.value.crossAccountMedia.find { it.file.id == file.id }?.account
+            ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val result = repository.renameFile(account, file, newName)
@@ -290,6 +364,7 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 loadCurrentFolderFiles()
+                loadCrossAccountMedia()
             }.onFailure { ex ->
                 _uiState.update {
                     it.copy(
@@ -302,7 +377,9 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteFile(file: DriveFile) {
-        val account = _uiState.value.activeAccount ?: return
+        val account = _uiState.value.activeAccount
+            ?: _uiState.value.crossAccountMedia.find { it.file.id == file.id }?.account
+            ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val result = repository.deleteFile(account, file)
@@ -314,6 +391,7 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 loadCurrentFolderFiles()
+                loadCrossAccountMedia()
             }.onFailure { ex ->
                 _uiState.update {
                     it.copy(
@@ -325,9 +403,6 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Adds an account either via Credential Manager token or direct OAuth access token.
-     */
     fun addAccount(
         email: String,
         displayName: String,
@@ -345,6 +420,7 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
         )
         repository.saveAccount(newAccount)
         loadAccounts()
+        loadCrossAccountMedia()
         _uiState.update {
             it.copy(
                 infoMessage = "Account ${newAccount.email} added successfully",
@@ -353,15 +429,17 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun signInWithCredentialManager(serverClientId: String? = null) {
+    fun signInWithCredentialManager(activity: Activity, serverClientId: String? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val result = authManager.signInWithCredentialManager(
-                serverClientId ?: "YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com"
+                activity = activity,
+                serverClientId = serverClientId
             )
             result.onSuccess { account ->
                 repository.saveAccount(account)
                 loadAccounts()
+                loadCrossAccountMedia()
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -386,6 +464,7 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(activeAccount = null, folderStack = emptyList()) }
         }
         loadAccounts()
+        loadCrossAccountMedia()
         _uiState.update { it.copy(infoMessage = "Account removed") }
     }
 

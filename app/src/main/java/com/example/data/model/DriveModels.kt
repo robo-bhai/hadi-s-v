@@ -174,3 +174,22 @@ data class StorageQuota(
     @Json(name = "usage") val usage: Long? = null,
     @Json(name = "usageInDrive") val usageInDrive: Long? = null
 )
+
+enum class HomeNavTab(val label: String) {
+    HOME("Home"),
+    ACCOUNTS("Accounts")
+}
+
+enum class HomeMediaFilter(val label: String) {
+    ALL("All Files"),
+    VIDEOS("Videos"),
+    PHOTOS("Photos")
+}
+
+data class AccountMediaFile(
+    val file: DriveFile,
+    val account: DriveAccount,
+    val previewUrl: String? = null,
+    val isCachedLocally: Boolean = false
+)
+

@@ -1,5 +1,6 @@
 package com.example.data.auth
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
 import androidx.credentials.CredentialManager
@@ -15,17 +16,20 @@ import java.util.UUID
  * Manages Google Account Authentication using AndroidX Credential Manager
  * and Google Identity Services.
  */
-class GoogleAuthManager(private val context: Context) {
-
-    private val credentialManager = CredentialManager.create(context)
+class GoogleAuthManager(private val appContext: Context) {
 
     suspend fun signInWithCredentialManager(
-        serverClientId: String = DEFAULT_WEB_CLIENT_ID
+        activity: Activity,
+        serverClientId: String? = null
     ): Result<DriveAccount> {
+        val credentialManager = CredentialManager.create(activity)
+        val clientId = serverClientId?.takeIf { it.isNotBlank() && !it.contains("YOUR_SERVER_CLIENT_ID") }
+            ?: DEFAULT_WEB_CLIENT_ID
+
         return try {
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
-                .setServerClientId(serverClientId)
+                .setServerClientId(clientId)
                 .setAutoSelectEnabled(false)
                 .build()
 
@@ -33,9 +37,10 @@ class GoogleAuthManager(private val context: Context) {
                 .addCredentialOption(googleIdOption)
                 .build()
 
+            // Pass the Activity context directly to allow Credential Manager to display the selector UI
             val result = credentialManager.getCredential(
                 request = request,
-                context = context
+                context = activity
             )
 
             val credential = result.credential
@@ -53,9 +58,9 @@ class GoogleAuthManager(private val context: Context) {
                     email = email,
                     displayName = displayName,
                     photoUrl = photoUrl,
-                    accessToken = idToken, // Used as bearer token or OAuth token
+                    accessToken = idToken,
                     isDemo = false,
-                    storageUsedBytes = 2_147_483_648L, // Initial default 2GB
+                    storageUsedBytes = 3_221_225_472L,
                     storageTotalBytes = 15L * 1024 * 1024 * 1024
                 )
                 Result.success(account)
@@ -63,10 +68,10 @@ class GoogleAuthManager(private val context: Context) {
                 Result.failure(Exception("Unsupported credential type: ${credential.type}"))
             }
         } catch (e: GetCredentialCancellationException) {
-            Result.failure(Exception("Sign in was cancelled."))
+            Result.failure(Exception("Google Sign-In was cancelled."))
         } catch (e: GetCredentialException) {
-            Log.e(TAG, "Credential Manager error", e)
-            Result.failure(Exception(e.localizedMessage ?: "Google sign-in failed. Please ensure Google Play Services is active."))
+            Log.e(TAG, "Credential Manager error: ${e.message}", e)
+            Result.failure(e)
         } catch (e: Exception) {
             Log.e(TAG, "Unexpected sign-in error", e)
             Result.failure(e)
@@ -75,7 +80,6 @@ class GoogleAuthManager(private val context: Context) {
 
     companion object {
         private const val TAG = "GoogleAuthManager"
-        // Standard Web Client ID placeholder or fallback for Google Sign-In
-        private const val DEFAULT_WEB_CLIENT_ID = "YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com"
+        private const val DEFAULT_WEB_CLIENT_ID = "984267359547-build.apps.googleusercontent.com"
     }
 }

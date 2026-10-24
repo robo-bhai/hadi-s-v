@@ -328,8 +328,59 @@ class GoogleDriveRepository(
         localDriveStores["acc_personal"] = createPersonalFolderHierarchy("acc_personal")
     }
 
+    private val cachedFileIds = mutableSetOf<String>()
+
+    fun getCacheStats(): Pair<Int, String> {
+        val count = cachedFileIds.size
+        val totalEstimatedBytes = count * 1_450_000L
+        val formatted = String.format(Locale.US, "%.1f MB", totalEstimatedBytes / (1024.0 * 1024.0))
+        return Pair(count, formatted)
+    }
+
+    fun clearCache(): String {
+        val count = cachedFileIds.size
+        cachedFileIds.clear()
+        return "Cleared $count cached media items from local storage"
+    }
+
+    fun toggleCache(fileId: String): Boolean {
+        return if (cachedFileIds.contains(fileId)) {
+            cachedFileIds.remove(fileId)
+            false
+        } else {
+            cachedFileIds.add(fileId)
+            true
+        }
+    }
+
+    fun getAllFilesAcrossAccounts(filter: com.example.data.model.HomeMediaFilter): List<com.example.data.model.AccountMediaFile> {
+        val accounts = getAccounts()
+        val allMedia = mutableListOf<com.example.data.model.AccountMediaFile>()
+
+        for (account in accounts) {
+            val files = localDriveStores[account.id] ?: emptyList()
+            val filtered = when (filter) {
+                com.example.data.model.HomeMediaFilter.ALL -> files.filter { !it.isFolder && it.trashed != true }
+                com.example.data.model.HomeMediaFilter.VIDEOS -> files.filter { it.category == com.example.data.model.FileCategory.VIDEO && it.trashed != true }
+                com.example.data.model.HomeMediaFilter.PHOTOS -> files.filter { it.category == com.example.data.model.FileCategory.IMAGE && it.trashed != true }
+            }
+
+            allMedia.addAll(
+                filtered.map { file ->
+                    com.example.data.model.AccountMediaFile(
+                        file = file,
+                        account = account,
+                        previewUrl = file.thumbnailLink,
+                        isCachedLocally = cachedFileIds.contains(file.id)
+                    )
+                }
+            )
+        }
+
+        return allMedia.sortedByDescending { it.file.modifiedTime ?: "" }
+    }
+
     private fun createDefaultFolderHierarchy(accountId: String): MutableList<DriveFile> {
-        val now = currentUtcIsoTime()
         return mutableListOf(
             DriveFile(
                 id = "${accountId}_f_projects",
@@ -353,13 +404,57 @@ class GoogleDriveRepository(
                 parents = listOf("root")
             ),
             DriveFile(
+                id = "${accountId}_vid_keynote",
+                name = "Company_Keynote_2026.mp4",
+                mimeType = "video/mp4",
+                size = 88_200_000L,
+                modifiedTime = "2026-10-24T09:00:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800"
+            ),
+            DriveFile(
+                id = "${accountId}_vid_demo",
+                name = "Product_Demo_Walkthrough.mp4",
+                mimeType = "video/mp4",
+                size = 44_600_000L,
+                modifiedTime = "2026-10-23T18:15:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800"
+            ),
+            DriveFile(
+                id = "${accountId}_img_office",
+                name = "Office_Architecture_Modern.jpg",
+                mimeType = "image/jpeg",
+                size = 3_450_000L,
+                modifiedTime = "2026-10-24T08:30:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800"
+            ),
+            DriveFile(
+                id = "${accountId}_img_sprint",
+                name = "Design_Sprint_Whiteboard.jpg",
+                mimeType = "image/jpeg",
+                size = 2_890_000L,
+                modifiedTime = "2026-10-23T16:20:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1531403009284-440f080d1e12?w=800"
+            ),
+            DriveFile(
+                id = "${accountId}_img_summit",
+                name = "Team_Summit_2026.jpg",
+                mimeType = "image/jpeg",
+                size = 4_100_000L,
+                modifiedTime = "2026-10-22T14:10:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800"
+            ),
+            DriveFile(
                 id = "${accountId}_doc_roadmap",
                 name = "Q4 Product Roadmap.docx",
                 mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 size = 1_420_000L,
                 modifiedTime = "2026-10-24T08:12:00.000Z",
-                parents = listOf("root"),
-                webViewLink = "https://drive.google.com"
+                parents = listOf("root")
             ),
             DriveFile(
                 id = "${accountId}_sheet_budget",
@@ -386,36 +481,13 @@ class GoogleDriveRepository(
                 parents = listOf("${accountId}_f_projects")
             ),
             DriveFile(
-                id = "${accountId}_f_backend_apis",
-                name = "REST API Specifications",
-                mimeType = "application/vnd.google-apps.folder",
-                modifiedTime = "2026-10-21T10:10:00.000Z",
-                parents = listOf("${accountId}_f_projects")
-            ),
-            DriveFile(
-                id = "${accountId}_spec_doc",
-                name = "Architecture Overview v2.pdf",
-                mimeType = "application/pdf",
-                size = 3_200_000L,
-                modifiedTime = "2026-10-23T16:45:00.000Z",
-                parents = listOf("${accountId}_f_projects")
-            ),
-            // Nested subfolder in Mobile App Design System
-            DriveFile(
-                id = "${accountId}_figma_export",
-                name = "Material3_Tokens_DarkLight.json",
-                mimeType = "application/json",
-                size = 85_000L,
-                modifiedTime = "2026-10-24T07:15:00.000Z",
-                parents = listOf("${accountId}_f_mobile_app")
-            ),
-            DriveFile(
                 id = "${accountId}_app_mockup",
                 name = "Dashboard_Wireframe_HighRes.png",
                 mimeType = "image/png",
                 size = 5_400_000L,
                 modifiedTime = "2026-10-23T18:20:00.000Z",
-                parents = listOf("${accountId}_f_mobile_app")
+                parents = listOf("${accountId}_f_mobile_app"),
+                thumbnailLink = "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?w=800"
             )
         )
     }
@@ -430,36 +502,67 @@ class GoogleDriveRepository(
                 parents = listOf("root")
             ),
             DriveFile(
-                id = "${accountId}_f_tax",
-                name = "Tax & Receipts 2026",
-                mimeType = "application/vnd.google-apps.folder",
-                modifiedTime = "2026-10-15T11:20:00.000Z",
-                parents = listOf("root")
+                id = "${accountId}_vid_scuba",
+                name = "GoPro_Scuba_Diving.mp4",
+                mimeType = "video/mp4",
+                size = 134_000_000L,
+                modifiedTime = "2026-10-24T07:45:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800"
             ),
             DriveFile(
-                id = "${accountId}_img_family",
-                name = "Family_Reunion_Cover.jpg",
+                id = "${accountId}_vid_drone",
+                name = "Drone_Coastline_4K.mp4",
+                mimeType = "video/mp4",
+                size = 226_000_000L,
+                modifiedTime = "2026-10-23T12:30:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800"
+            ),
+            DriveFile(
+                id = "${accountId}_vid_tokyo_night",
+                name = "Tokyo_Night_Street_Vlog.mp4",
+                mimeType = "video/mp4",
+                size = 98_000_000L,
+                modifiedTime = "2026-10-22T21:10:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800"
+            ),
+            DriveFile(
+                id = "${accountId}_img_fuji",
+                name = "Mount_Fuji_Sunrise.jpg",
                 mimeType = "image/jpeg",
-                size = 4_850_000L,
-                modifiedTime = "2026-10-22T19:40:00.000Z",
-                parents = listOf("root")
+                size = 5_200_000L,
+                modifiedTime = "2026-10-24T05:30:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=800"
             ),
             DriveFile(
-                id = "${accountId}_audio_podcast",
-                name = "Voice Memo Notes.m4a",
-                mimeType = "audio/m4a",
-                size = 12_400_000L,
-                modifiedTime = "2026-10-24T06:50:00.000Z",
-                parents = listOf("root")
+                id = "${accountId}_img_cherry",
+                name = "Tokyo_Cherry_Blossoms.jpg",
+                mimeType = "image/jpeg",
+                size = 4_300_000L,
+                modifiedTime = "2026-10-23T11:00:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1522383225653-ed111181a951?w=800"
             ),
-            // Subfolder in Japan Trip
+            DriveFile(
+                id = "${accountId}_img_hokkaido",
+                name = "Hokkaido_Snow_Cabin.jpg",
+                mimeType = "image/jpeg",
+                size = 3_900_000L,
+                modifiedTime = "2026-10-22T16:40:00.000Z",
+                parents = listOf("root"),
+                thumbnailLink = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800"
+            ),
             DriveFile(
                 id = "${accountId}_img_kyoto",
                 name = "Kyoto_Bamboo_Forest.jpg",
                 mimeType = "image/jpeg",
                 size = 6_200_000L,
                 modifiedTime = "2026-10-21T14:15:00.000Z",
-                parents = listOf("${accountId}_f_vacation")
+                parents = listOf("${accountId}_f_vacation"),
+                thumbnailLink = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800"
             ),
             DriveFile(
                 id = "${accountId}_img_tokyo",
@@ -467,7 +570,8 @@ class GoogleDriveRepository(
                 mimeType = "image/jpeg",
                 size = 5_900_000L,
                 modifiedTime = "2026-10-21T15:30:00.000Z",
-                parents = listOf("${accountId}_f_vacation")
+                parents = listOf("${accountId}_f_vacation"),
+                thumbnailLink = "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800"
             ),
             DriveFile(
                 id = "${accountId}_trip_itinerary",
