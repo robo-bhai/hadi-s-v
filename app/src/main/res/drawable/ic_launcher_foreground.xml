@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/drive_launcher_icon_1792860057883"
+        android:drawable="@drawable/ic_edit88_logo"
         android:gravity="center" />
 </layer-list>
