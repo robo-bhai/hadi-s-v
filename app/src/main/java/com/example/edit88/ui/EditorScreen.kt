@@ -1,5 +1,12 @@
 package com.example.edit88.ui
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -526,26 +533,107 @@ private fun EditorTopBar(
                 )
             }
 
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(6.dp))
 
-            // Export Button
+            // Responsive Pro Export Button
+            ResponsiveExportButton(
+                onExport = onExport
+            )
+        }
+    }
+}
+
+@Composable
+private fun ResponsiveExportButton(
+    onExport: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.92f else 1.0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "export_scale"
+    )
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        Color(0xFF06B6D4), // Electric Cyan
+                        Color(0xFF3B82F6), // Vibrant Blue
+                        Color(0xFF8B5CF6)  // Vivid Purple
+                    )
+                )
+            )
+            .border(
+                1.dp,
+                Brush.horizontalGradient(
+                    listOf(
+                        Color(0xFF38BDF8),
+                        Color(0xFFC084FC)
+                    )
+                ),
+                RoundedCornerShape(20.dp)
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onExport
+            )
+            .padding(horizontal = 11.dp, vertical = 6.dp)
+            .testTag("top_export_button")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            // High-def badge
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(AccentPurple, AccentPink)
-                        )
-                    )
-                    .clickable(onClick = onExport)
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                    .background(Color(0x55000000), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.FileDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Export", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .background(Color(0xFF22C55E), CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = "1080P",
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
                 }
             }
+
+            Spacer(modifier = Modifier.width(5.dp))
+
+            Text(
+                text = "EXPORT",
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.5.sp
+            )
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            Icon(
+                imageVector = Icons.Default.FileDownload,
+                contentDescription = "Export Video",
+                tint = Color.White,
+                modifier = Modifier.size(15.dp)
+            )
         }
     }
 }

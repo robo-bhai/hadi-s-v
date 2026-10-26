@@ -813,7 +813,16 @@ class VideoEditorViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun setTimelineZoom(zoom: Float) {
-        _uiState.update { it.copy(timelineZoom = zoom.coerceIn(0.5f, 3.0f)) }
+        _uiState.update { it.copy(timelineZoom = zoom.coerceIn(0.15f, 5.0f)) }
+    }
+
+    fun zoomToFitTimeline(viewportWidthDp: Float = 360f) {
+        val totalMs = _uiState.value.project.totalDurationMs.coerceAtLeast(5000L)
+        // 1000ms = 60dp at 1.0f zoom. Total dp = (totalMs / 1000f) * 60f * zoom
+        // Fit all clips inside viewport width
+        val targetWidthDp = (viewportWidthDp - 60f).coerceAtLeast(200f)
+        val idealZoom = (targetWidthDp / ((totalMs / 1000f) * 60f)).coerceIn(0.15f, 2.0f)
+        setTimelineZoom(idealZoom)
     }
 
     fun addMediaClip(clip: MediaClip) {

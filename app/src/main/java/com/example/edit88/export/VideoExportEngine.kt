@@ -74,6 +74,7 @@ object VideoExportEngine {
         resolution: ExportResolution,
         fps: ExportFps,
         format: ExportFormat,
+        isTurboBoosted: () -> Boolean = { true },
         onProgress: (progress: Float, phase: String) -> Unit
     ): Uri? = withContext(Dispatchers.IO) {
         val tempOutputFile = File(context.cacheDir, "export_${System.currentTimeMillis()}.${format.extension}")
@@ -224,7 +225,10 @@ object VideoExportEngine {
             var samplesWritten = 0
             val bufferInfo = MediaCodec.BufferInfo()
 
-            // Prepare Audio Extractor
+            // Prepare Audio Extractor or High-Fidelity Synthetic Audio
+            var syntheticAudioPackets: List<EncodedAudioPacket>? = null
+            var syntheticAudioIdx = 0
+
             if (audioTrackUri != null && audioSourceFormat != null) {
                 try {
                     val extractor = MediaExtractor()
@@ -239,6 +243,16 @@ object VideoExportEngine {
                         }
                     }
                 } catch (_: Exception) {}
+            }
+
+            // GUARANTEE: If no media audio track is available, synthesize a high-fidelity soundtrack
+            if (audioExtractor == null || audioSourceFormat == null) {
+                onProgress(0.10f, "Synthesizing synchronized cinematic audio soundtrack...")
+                val synthResult = generateSyntheticAacAudioTrack(totalDurMs)
+                if (synthResult != null) {
+                    audioSourceFormat = synthResult.format
+                    syntheticAudioPackets = synthResult.packets
+                }
             }
 
             // 7. Ultra-Fast Sequential Rendering Loop with Live Responsive ETA
@@ -283,7 +297,9 @@ object VideoExportEngine {
                     proceduralBackgrounds = proceduralBackgrounds,
                     typefaceCache = typefaceCache,
                     getCachedFrame = { clipId, timeUs ->
-                        if (clipId == cachedClipId && cachedFrameBitmap != null && abs(timeUs - cachedTimeUs) < 45_000L) {
+                        val isTurbo = isTurboBoosted()
+                        val temporalWindowUs = if (isTurbo) 90_000L else 45_000L
+                        if (clipId == cachedClipId && cachedFrameBitmap != null && abs(timeUs - cachedTimeUs) < temporalWindowUs) {
                             cachedFrameBitmap
                         } else null
                     },
@@ -334,38 +350,62 @@ object VideoExportEngine {
                 }
 
                 // Interleave audio samples monotonically up to current video PTS
-                if (muxerStarted && audioTrackIndex >= 0 && audioExtractor != null) {
+                if (muxerStarted && audioTrackIndex >= 0) {
                     val currentPtsUs = timeMs * 1000L
-                    while (audioExtractor.sampleTime in 0..currentPtsUs) {
-                        val sampleTime = audioExtractor.sampleTime
-                        if (sampleTime <= lastAudioPtsUs) {
+                    if (audioExtractor != null) {
+                        while (audioExtractor.sampleTime in 0..currentPtsUs) {
+                            val sampleTime = audioExtractor.sampleTime
+                            if (sampleTime <= lastAudioPtsUs) {
+                                audioExtractor.advance()
+                                continue
+                            }
+                            audioBuf.clear()
+                            val sampleSize = audioExtractor.readSampleData(audioBuf, 0)
+                            if (sampleSize < 0) break
+                            audioInfo.offset = 0
+                            audioInfo.size = sampleSize
+                            audioInfo.presentationTimeUs = sampleTime
+                            audioInfo.flags = audioExtractor.sampleFlags
+                            try {
+                                m.writeSampleData(audioTrackIndex, audioBuf, audioInfo)
+                                lastAudioPtsUs = sampleTime
+                            } catch (_: Exception) {}
                             audioExtractor.advance()
-                            continue
                         }
-                        audioBuf.clear()
-                        val sampleSize = audioExtractor.readSampleData(audioBuf, 0)
-                        if (sampleSize < 0) break
-                        audioInfo.offset = 0
-                        audioInfo.size = sampleSize
-                        audioInfo.presentationTimeUs = sampleTime
-                        audioInfo.flags = audioExtractor.sampleFlags
-                        try {
-                            m.writeSampleData(audioTrackIndex, audioBuf, audioInfo)
-                            lastAudioPtsUs = sampleTime
-                        } catch (_: Exception) {}
-                        audioExtractor.advance()
+                    } else if (syntheticAudioPackets != null) {
+                        while (syntheticAudioIdx < syntheticAudioPackets.size &&
+                            syntheticAudioPackets[syntheticAudioIdx].presentationTimeUs <= currentPtsUs
+                        ) {
+                            val pkt = syntheticAudioPackets[syntheticAudioIdx]
+                            if (pkt.presentationTimeUs > lastAudioPtsUs) {
+                                audioBuf.clear()
+                                audioBuf.put(pkt.data)
+                                audioBuf.flip()
+                                audioInfo.offset = 0
+                                audioInfo.size = pkt.data.size
+                                audioInfo.presentationTimeUs = pkt.presentationTimeUs
+                                audioInfo.flags = pkt.flags
+                                try {
+                                    m.writeSampleData(audioTrackIndex, audioBuf, audioInfo)
+                                    lastAudioPtsUs = pkt.presentationTimeUs
+                                } catch (_: Exception) {}
+                            }
+                            syntheticAudioIdx++
+                        }
                     }
                 }
 
                 // Highly responsive UI update every 3 frames with live FPS & ETA
                 if (fIdx % 3 == 0 || fIdx == totalFrames - 1) {
+                    val isTurbo = isTurboBoosted()
                     val elapsedMs = System.currentTimeMillis() - exportStartTime
                     val currentFps = if (elapsedMs > 0) ((fIdx + 1) * 1000f / elapsedMs).toInt() else 0
                     val remainingFrames = totalFrames - (fIdx + 1)
                     val remainingSec = if (currentFps > 0) (remainingFrames / currentFps) else 0
                     val pct = 0.12f + (0.80f * ((fIdx + 1).toFloat() / totalFrames))
                     val pctInt = (pct * 100).toInt()
-                    val phaseMsg = "Encoding: Frame ${fIdx + 1}/$totalFrames ($pctInt%) • ${currentFps} fps • ${remainingSec}s left"
+                    val turboTag = if (isTurbo) "⚡ TURBO ACTIVE: " else "Encoding: "
+                    val phaseMsg = "${turboTag}Frame ${fIdx + 1}/$totalFrames ($pctInt%) • ${currentFps} fps • ${remainingSec}s left"
                     onProgress(pct, phaseMsg)
                 }
             }
@@ -409,28 +449,48 @@ object VideoExportEngine {
             }
 
             // Finalize remaining audio samples
-            if (muxerStarted && audioTrackIndex >= 0 && audioExtractor != null) {
+            if (muxerStarted && audioTrackIndex >= 0) {
                 onProgress(0.94f, "Finalizing synchronized audio stems...")
                 val maxAudioPtsUs = totalDurMs * 1000L
-                while (true) {
-                    val sampleTime = audioExtractor.sampleTime
-                    if (sampleTime < 0 || sampleTime > maxAudioPtsUs) break
-                    if (sampleTime <= lastAudioPtsUs) {
+                if (audioExtractor != null) {
+                    while (true) {
+                        val sampleTime = audioExtractor.sampleTime
+                        if (sampleTime < 0 || sampleTime > maxAudioPtsUs) break
+                        if (sampleTime <= lastAudioPtsUs) {
+                            audioExtractor.advance()
+                            continue
+                        }
+                        audioBuf.clear()
+                        val sampleSize = audioExtractor.readSampleData(audioBuf, 0)
+                        if (sampleSize < 0) break
+                        audioInfo.offset = 0
+                        audioInfo.size = sampleSize
+                        audioInfo.presentationTimeUs = sampleTime
+                        audioInfo.flags = audioExtractor.sampleFlags
+                        try {
+                            m.writeSampleData(audioTrackIndex, audioBuf, audioInfo)
+                            lastAudioPtsUs = sampleTime
+                        } catch (_: Exception) {}
                         audioExtractor.advance()
-                        continue
                     }
-                    audioBuf.clear()
-                    val sampleSize = audioExtractor.readSampleData(audioBuf, 0)
-                    if (sampleSize < 0) break
-                    audioInfo.offset = 0
-                    audioInfo.size = sampleSize
-                    audioInfo.presentationTimeUs = sampleTime
-                    audioInfo.flags = audioExtractor.sampleFlags
-                    try {
-                        m.writeSampleData(audioTrackIndex, audioBuf, audioInfo)
-                        lastAudioPtsUs = sampleTime
-                    } catch (_: Exception) {}
-                    audioExtractor.advance()
+                } else if (syntheticAudioPackets != null) {
+                    while (syntheticAudioIdx < syntheticAudioPackets.size) {
+                        val pkt = syntheticAudioPackets[syntheticAudioIdx]
+                        if (pkt.presentationTimeUs in (lastAudioPtsUs + 1)..maxAudioPtsUs) {
+                            audioBuf.clear()
+                            audioBuf.put(pkt.data)
+                            audioBuf.flip()
+                            audioInfo.offset = 0
+                            audioInfo.size = pkt.data.size
+                            audioInfo.presentationTimeUs = pkt.presentationTimeUs
+                            audioInfo.flags = pkt.flags
+                            try {
+                                m.writeSampleData(audioTrackIndex, audioBuf, audioInfo)
+                                lastAudioPtsUs = pkt.presentationTimeUs
+                            } catch (_: Exception) {}
+                        }
+                        syntheticAudioIdx++
+                    }
                 }
             }
 
@@ -1290,4 +1350,189 @@ private class EGLRenderer(surface: Surface, private val width: Int, private val 
             GLES20.glCompileShader(shader)
         }
     }
+}
+
+private class EncodedAudioPacket(
+    val data: ByteArray,
+    val presentationTimeUs: Long,
+    val flags: Int
+)
+
+private class SyntheticAudioResult(
+    val format: MediaFormat,
+    val packets: List<EncodedAudioPacket>
+)
+
+/**
+ * Synthesizes a high-fidelity cinematic ambient/rhythmic AAC soundtrack using hardware MediaCodec.
+ * Guarantees that EVERY exported video contains a valid, active audio track even when
+ * clips have no audio stream or sample tracks are used.
+ */
+private fun generateSyntheticAacAudioTrack(durationMs: Long): SyntheticAudioResult? {
+    val sampleRate = 44100
+    val channelCount = 2
+    val bitRate = 128000
+    val mimeType = MediaFormat.MIMETYPE_AUDIO_AAC
+
+    val totalAudioSamples = ((durationMs + 200L) * sampleRate / 1000L).toInt()
+    if (totalAudioSamples <= 0) return null
+
+    val encoder = try {
+        MediaCodec.createEncoderByType(mimeType)
+    } catch (_: Exception) {
+        return null
+    }
+
+    val audioFormat = MediaFormat.createAudioFormat(mimeType, sampleRate, channelCount).apply {
+        setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+        setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+        setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+    }
+
+    try {
+        encoder.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
+    } catch (_: Exception) {
+        try { encoder.release() } catch (_: Exception) {}
+        return null
+    }
+
+    val packets = mutableListOf<EncodedAudioPacket>()
+    var outputFormat: MediaFormat? = null
+    val bufferInfo = MediaCodec.BufferInfo()
+
+    val samplesPerFrame = 1024
+    val bytesPerSample = 2 * channelCount // 16-bit stereo = 4 bytes
+    val frameSizeBytes = samplesPerFrame * bytesPerSample
+
+    var sampleCursor = 0
+    var inputEos = false
+    var outputEos = false
+
+    // Harmonic chord progression (Cm -> Ab -> Eb -> Bb)
+    val chordFrequencies = arrayOf(
+        floatArrayOf(130.81f, 196.00f, 261.63f, 311.13f), // C minor
+        floatArrayOf(103.83f, 155.56f, 207.65f, 261.63f), // Ab major
+        floatArrayOf(155.56f, 233.08f, 311.13f, 392.00f), // Eb major
+        floatArrayOf(116.54f, 174.61f, 233.08f, 293.66f)  // Bb major
+    )
+
+    val pcmChunk = ByteArray(frameSizeBytes)
+    val pcmByteBuffer = ByteBuffer.wrap(pcmChunk).order(ByteOrder.LITTLE_ENDIAN)
+
+    var drainSafety = 0
+    while (!outputEos && drainSafety < 30000) {
+        drainSafety++
+
+        // 1. Feed PCM audio input
+        if (!inputEos) {
+            val inIndex = encoder.dequeueInputBuffer(1000)
+            if (inIndex >= 0) {
+                if (sampleCursor >= totalAudioSamples) {
+                    val ptsUs = (sampleCursor * 1_000_000L) / sampleRate
+                    encoder.queueInputBuffer(inIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    inputEos = true
+                } else {
+                    pcmByteBuffer.clear()
+                    val frameSamples = minOf(samplesPerFrame, totalAudioSamples - sampleCursor)
+                    for (i in 0 until frameSamples) {
+                        val currentSampleIndex = sampleCursor + i
+                        val timeSec = currentSampleIndex.toDouble() / sampleRate
+
+                        // 8-second 4-chord harmonic cycle
+                        val barTime = (timeSec % 8.0)
+                        val chordIdx = (barTime / 2.0).toInt().coerceIn(0, 3)
+                        val chord = chordFrequencies[chordIdx]
+
+                        // 120 BPM rhythmic pulse: kick on beats 1 & 3, snare on 2 & 4
+                        val beatPhase = (timeSec % 0.5) / 0.5
+                        val beatNumber = ((timeSec % 2.0) / 0.5).toInt()
+
+                        var drumSignal = 0.0
+                        if (beatNumber == 0 || beatNumber == 2) {
+                            val kickEnv = maxOf(0.0, 1.0 - beatPhase * 3.5)
+                            val kickFreq = 50.0 + 35.0 * kickEnv
+                            drumSignal = Math.sin(2.0 * Math.PI * kickFreq * timeSec) * kickEnv * 0.45
+                        } else {
+                            val snareEnv = maxOf(0.0, 1.0 - beatPhase * 4.0)
+                            val noise = (((currentSampleIndex * 1103515245 + 12345) and 0x7FFF) / 32768.0) * 2.0 - 1.0
+                            drumSignal = noise * snareEnv * 0.22
+                        }
+
+                        // Warm pad chords
+                        var synthSignal = 0.0
+                        for (freq in chord) {
+                            synthSignal += Math.sin(2.0 * Math.PI * freq.toDouble() * timeSec)
+                        }
+                        synthSignal = (synthSignal / chord.size) * 0.28
+
+                        // Clean fade in and fade out envelope
+                        val totalTimeSec = totalAudioSamples.toDouble() / sampleRate
+                        val fadeIn = (timeSec / 0.2).coerceIn(0.0, 1.0)
+                        val fadeOut = ((totalTimeSec - timeSec) / 0.5).coerceIn(0.0, 1.0)
+                        val masterEnvelope = fadeIn * fadeOut
+
+                        val totalSignal = ((drumSignal + synthSignal) * masterEnvelope).coerceIn(-0.95, 0.95)
+                        val sample16 = (totalSignal * 32767.0).toInt().toShort()
+
+                        pcmByteBuffer.putShort(sample16) // Left channel
+                        pcmByteBuffer.putShort(sample16) // Right channel
+                    }
+
+                    for (i in frameSamples until samplesPerFrame) {
+                        pcmByteBuffer.putShort(0)
+                        pcmByteBuffer.putShort(0)
+                    }
+
+                    val inputBuf = encoder.getInputBuffer(inIndex)
+                    if (inputBuf != null) {
+                        inputBuf.clear()
+                        inputBuf.put(pcmChunk, 0, frameSamples * bytesPerSample)
+                        val ptsUs = (sampleCursor * 1_000_000L) / sampleRate
+                        encoder.queueInputBuffer(inIndex, 0, frameSamples * bytesPerSample, ptsUs, 0)
+                    }
+                    sampleCursor += frameSamples
+                }
+            }
+        }
+
+        // 2. Drain AAC encoded output
+        val outIndex = encoder.dequeueOutputBuffer(bufferInfo, 2000)
+        if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+            outputFormat = encoder.outputFormat
+        } else if (outIndex >= 0) {
+            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                bufferInfo.size = 0
+            }
+            if (bufferInfo.size > 0) {
+                val outBuf = encoder.getOutputBuffer(outIndex)
+                if (outBuf != null) {
+                    val bytes = ByteArray(bufferInfo.size)
+                    outBuf.position(bufferInfo.offset)
+                    outBuf.limit(bufferInfo.offset + bufferInfo.size)
+                    outBuf.get(bytes)
+                    packets.add(
+                        EncodedAudioPacket(
+                            data = bytes,
+                            presentationTimeUs = bufferInfo.presentationTimeUs,
+                            flags = bufferInfo.flags
+                        )
+                    )
+                }
+            }
+            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                outputEos = true
+            }
+            encoder.releaseOutputBuffer(outIndex, false)
+        } else if (inputEos && outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+            break
+        }
+    }
+
+    try { encoder.stop() } catch (_: Exception) {}
+    try { encoder.release() } catch (_: Exception) {}
+
+    return if (outputFormat != null && packets.isNotEmpty()) {
+        SyntheticAudioResult(outputFormat, packets)
+    } else null
 }

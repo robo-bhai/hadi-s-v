@@ -86,6 +86,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.gestures.detectTransformGestures
 import java.io.File
+import kotlin.math.abs
 
 import com.example.edit88.model.TransitionType
 
@@ -146,8 +147,8 @@ fun MultiTrackTimeline(
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
 
-    // Scale: 1000ms = 60dp (scaled by zoom from 0.25x overview to 5.0x frame-by-frame precision)
-    val msPerDp = (1000f / 60f) / timelineZoom.coerceIn(0.25f, 5.0f)
+    // Scale: 1000ms = 60dp (scaled by zoom from 0.15x shrink overview to 5.0x frame-by-frame precision)
+    val msPerDp = (1000f / 60f) / timelineZoom.coerceIn(0.15f, 5.0f)
     val totalDurationMs = project.totalDurationMs.coerceAtLeast(15000L)
     val timelineWidthDp = (totalDurationMs / msPerDp).dp
 
@@ -175,17 +176,26 @@ fun MultiTrackTimeline(
                 Text("Tracks", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
 
-            // Pinch-to-zoom & Scrollable Time Ruler
+            // Pinch-to-zoom & Scrollable Time Ruler with Tap & Drag Seeking
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .horizontalScroll(scrollState)
                     .pointerInput(timelineZoom) {
                         detectTransformGestures(panZoomLock = false) { _, _, zoom, _ ->
-                            if (zoom != 1f) {
-                                val newZoom = (timelineZoom * zoom).coerceIn(0.25f, 5.0f)
+                            if (abs(zoom - 1f) > 0.005f) {
+                                val newZoom = (timelineZoom * zoom).coerceIn(0.15f, 5.0f)
                                 onZoomChange?.invoke(newZoom)
                             }
+                        }
+                    }
+                    .pointerInput(totalDurationMs, msPerDp) {
+                        detectDragGestures { change, _ ->
+                            change.consume()
+                            val xPosPx = change.position.x
+                            val xPosDp = with(density) { xPosPx.toDp() }.value
+                            val targetMs = (xPosDp * msPerDp).toLong().coerceIn(0L, totalDurationMs)
+                            onSeekTo(targetMs)
                         }
                     }
             ) {
@@ -195,7 +205,8 @@ fun MultiTrackTimeline(
                     val stepSec = when {
                         timelineZoom >= 3.0f -> 1
                         timelineZoom >= 1.5f -> 2
-                        timelineZoom <= 0.6f -> 5
+                        timelineZoom <= 0.4f -> 10
+                        timelineZoom <= 0.7f -> 5
                         else -> 2
                     }
                     val totalSec = (totalDurationMs / 1000).toInt() + 4
@@ -221,11 +232,28 @@ fun MultiTrackTimeline(
                 }
             }
 
-            // Quick Pinch/Zoom Controls
+            // Quick Pinch/Zoom Controls (Fit, -, 1x, +)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(end = 8.dp)
             ) {
+                // Fit / Full View Button
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF0F172A), RoundedCornerShape(4.dp))
+                        .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                        .clickable {
+                            // Calculate zoom to fit all clips in standard viewport
+                            val fitZoom = (300f / ((totalDurationMs / 1000f) * 60f)).coerceIn(0.15f, 1.0f)
+                            onZoomChange?.invoke(fitZoom)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
+                    Text("↔ Fit", color = Color(0xFF38BDF8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
                 Text(
                     text = String.format("%.2fx", timelineZoom),
                     color = Color(0xFF38BDF8),
@@ -233,15 +261,17 @@ fun MultiTrackTimeline(
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.width(4.dp))
+                // Shrink (-)
                 Box(
                     modifier = Modifier
                         .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
-                        .clickable { onZoomChange?.invoke((timelineZoom - 0.25f).coerceIn(0.25f, 5.0f)) }
+                        .clickable { onZoomChange?.invoke((timelineZoom * 0.75f).coerceIn(0.15f, 5.0f)) }
                         .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {
                     Text("-", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(2.dp))
+                // Normal (1x)
                 Box(
                     modifier = Modifier
                         .background(if (timelineZoom == 1.0f) Color(0xFF38BDF8) else Color(0xFF1E293B), RoundedCornerShape(4.dp))
@@ -251,10 +281,11 @@ fun MultiTrackTimeline(
                     Text("1x", color = if (timelineZoom == 1.0f) Color.Black else Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(2.dp))
+                // Expand (+)
                 Box(
                     modifier = Modifier
                         .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
-                        .clickable { onZoomChange?.invoke((timelineZoom + 0.35f).coerceIn(0.25f, 5.0f)) }
+                        .clickable { onZoomChange?.invoke((timelineZoom * 1.35f).coerceIn(0.15f, 5.0f)) }
                         .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {
                     Text("+", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -285,7 +316,7 @@ fun MultiTrackTimeline(
                     TrackIconItem(icon = Icons.Default.Audiotrack, color = TrackAudioColor, label = "Audio", onAddClick = onAddAudioClick)
                 }
 
-                // Scrollable Tracks Area with Multi-Touch Pinch-to-Zoom
+                // Scrollable Tracks Area with Full Multi-Touch Pinch-to-Zoom (Shrink & Expand)
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -293,19 +324,10 @@ fun MultiTrackTimeline(
                         .horizontalScroll(scrollState)
                         .pointerInput(timelineZoom) {
                             detectTransformGestures(panZoomLock = false) { _, _, zoom, _ ->
-                                if (zoom != 1f) {
-                                    val newZoom = (timelineZoom * zoom).coerceIn(0.25f, 5.0f)
+                                if (abs(zoom - 1f) > 0.005f) {
+                                    val newZoom = (timelineZoom * zoom).coerceIn(0.15f, 5.0f)
                                     onZoomChange?.invoke(newZoom)
                                 }
-                            }
-                        }
-                        .pointerInput(totalDurationMs) {
-                            detectDragGestures { change, _ ->
-                                change.consume()
-                                val xPosPx = change.position.x
-                                val xPosDp = with(density) { xPosPx.toDp() }.value
-                                val targetMs = (xPosDp * msPerDp).toLong().coerceIn(0L, totalDurationMs)
-                                onSeekTo(targetMs)
                             }
                         }
                 ) {
@@ -373,14 +395,24 @@ fun MultiTrackTimeline(
                             .fillMaxHeight()
                             .width(2.dp)
                             .background(PlayheadColor)
+                            .zIndex(10f)
                     ) {
-                        // Pin Head
+                        // Pin Head with tactile drag handle
                         Box(
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
-                                .offset(y = (-2).dp)
-                                .size(12.dp)
-                                .background(PlayheadColor, RoundedCornerShape(2.dp))
+                                .offset(x = (-9).dp, y = (-4).dp)
+                                .size(20.dp)
+                                .background(PlayheadColor, CircleShape)
+                                .border(1.5.dp, Color.White, CircleShape)
+                                .pointerInput(totalDurationMs, msPerDp) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val deltaDp = with(density) { dragAmount.x.toDp() }.value
+                                        val deltaMs = (deltaDp * msPerDp).toLong()
+                                        onSeekTo((currentPlayheadMs + deltaMs).coerceIn(0L, totalDurationMs))
+                                    }
+                                }
                         )
                     }
                 }

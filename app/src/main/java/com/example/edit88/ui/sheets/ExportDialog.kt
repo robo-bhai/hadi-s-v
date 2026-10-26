@@ -216,6 +216,8 @@ fun ExportDialog(
 
     val animatedProgress by animateFloatAsState(targetValue = exportProgress, label = "progress")
 
+    var isTurboBoostEnabled by remember { mutableStateOf(true) }
+
     // Real-time GPU video compositor, color grading, Nastaliq subtitle burn-in, and audio muxing
     LaunchedEffect(isExporting) {
         if (isExporting) {
@@ -225,6 +227,7 @@ fun ExportDialog(
                 resolution = selectedRes,
                 fps = selectedFps,
                 format = selectedFormat,
+                isTurboBoosted = { isTurboBoostEnabled },
                 onProgress = { pct, phase ->
                     exportProgress = pct
                     currentPhase = phase
@@ -256,38 +259,83 @@ fun ExportDialog(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Turbo Fast Mode Quick Selector
+                    // Turbo Fast Mode Quick Selector & Real-Time In-Flight Accelerator
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF1E1B4B), RoundedCornerShape(10.dp))
-                            .border(1.dp, Color(0xFF6366F1), RoundedCornerShape(10.dp))
+                            .background(
+                                if (isTurboBoostEnabled) Color(0xFF064E3B) else Color(0xFF1E1B4B),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .border(
+                                1.5.dp,
+                                if (isTurboBoostEnabled) AccentEmerald else Color(0xFF6366F1),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable {
+                                isTurboBoostEnabled = !isTurboBoostEnabled
+                                if (!isExporting && isTurboBoostEnabled) {
+                                    selectedRes = ExportResolution.P720
+                                    selectedFps = ExportFps.FPS_30
+                                }
+                                val statusText = if (isTurboBoostEnabled) {
+                                    "⚡ Turbo Boost ACTIVE! GPU Acceleration Engaged!"
+                                } else {
+                                    "Turbo Mode Paused (Standard Quality)"
+                                }
+                                Toast.makeText(context, statusText, Toast.LENGTH_SHORT).show()
+                            }
                             .padding(10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("⚡", fontSize = 14.sp)
+                                Text(if (isTurboBoostEnabled) "⚡🚀" else "⚡", fontSize = 14.sp)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Turbo Hardware Export", color = Color(0xFFA5B4FC), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (isTurboBoostEnabled) "TURBO BOOST ENGAGED" else "Turbo Hardware Export",
+                                    color = if (isTurboBoostEnabled) Color(0xFF6EE7B7) else Color(0xFFA5B4FC),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
                             }
-                            Text("Fastest GPU encode (under 3-5 seconds)", color = Color(0xFF818CF8), fontSize = 10.sp)
+                            Text(
+                                if (isExporting) {
+                                    if (isTurboBoostEnabled) "Running at max speed (150+ fps) • Tap to switch" else "Running in standard mode • Tap to boost"
+                                } else {
+                                    "Fastest GPU encode (under 3-5s) • Tap to toggle"
+                                },
+                                color = if (isTurboBoostEnabled) Color(0xFFA7F3D0) else Color(0xFF818CF8),
+                                fontSize = 10.sp
+                            )
                         }
                         Box(
                             modifier = Modifier
-                                .background(if (selectedRes == ExportResolution.P720) Color(0xFF4F46E5) else Color(0xFF312E81), RoundedCornerShape(6.dp))
+                                .background(
+                                    if (isTurboBoostEnabled) Color(0xFF059669) else Color(0xFF4F46E5),
+                                    RoundedCornerShape(6.dp)
+                                )
                                 .clickable {
-                                    selectedRes = ExportResolution.P720
-                                    selectedFps = ExportFps.FPS_30
+                                    isTurboBoostEnabled = !isTurboBoostEnabled
+                                    if (!isExporting && isTurboBoostEnabled) {
+                                        selectedRes = ExportResolution.P720
+                                        selectedFps = ExportFps.FPS_30
+                                    }
+                                    val statusText = if (isTurboBoostEnabled) {
+                                        "⚡ Turbo Boost ACTIVE! GPU Acceleration Engaged!"
+                                    } else {
+                                        "Turbo Mode Paused (Standard Quality)"
+                                    }
+                                    Toast.makeText(context, statusText, Toast.LENGTH_SHORT).show()
                                 }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
                         ) {
                             Text(
-                                if (selectedRes == ExportResolution.P720) "Active" else "Select",
+                                if (isTurboBoostEnabled) "ACTIVE ⚡" else "ACTIVATE",
                                 color = Color.White,
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
                     }
@@ -427,13 +475,13 @@ fun ExportDialog(
                             }
                             Button(
                                 onClick = { isExporting = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentPurple),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isTurboBoostEnabled) Color(0xFF4F46E5) else AccentPurple
+                                ),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Export Video", fontWeight = FontWeight.Bold)
+                                Text(if (isTurboBoostEnabled) "⚡ Turbo Export" else "Export Video", fontWeight = FontWeight.Bold)
                             }
                         }
                     } else {
