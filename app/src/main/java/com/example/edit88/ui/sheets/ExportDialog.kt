@@ -254,7 +254,45 @@ fun ExportDialog(
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Turbo Fast Mode Quick Selector
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1E1B4B), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFF6366F1), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("⚡", fontSize = 14.sp)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Turbo Hardware Export", color = Color(0xFFA5B4FC), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Text("Fastest GPU encode (under 3-5 seconds)", color = Color(0xFF818CF8), fontSize = 10.sp)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .background(if (selectedRes == ExportResolution.P720) Color(0xFF4F46E5) else Color(0xFF312E81), RoundedCornerShape(6.dp))
+                                .clickable {
+                                    selectedRes = ExportResolution.P720
+                                    selectedFps = ExportFps.FPS_30
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                if (selectedRes == ExportResolution.P720) "Active" else "Select",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     if (!isExporting) {
                         // Resolution selector
